@@ -3,6 +3,7 @@ extends Control
 const Rules = preload("res://rules.gd")
 const Match = preload("res://match.gd")
 const SkillIcon = preload("res://skill_icon.gd")
+const CombatView = preload("res://assets/robot/combat_view.gd")
 const BASE := Color("#0c1924")
 const PANEL := Color("#101f2c")
 const TILE := Color("#172a38")
@@ -43,6 +44,8 @@ var round_badge: Label
 var center_box: Control
 var center_title: Label
 var center_detail: Label
+var character_picker: Panel
+var character_buttons: Array[Button] = []
 var roster: Array[Label] = []
 var shop_rows: Array[Button] = []
 var shop_names: Array[Label] = []
@@ -290,6 +293,7 @@ func build_game() -> void:
 	center_box = panel(game_layer, Rect2(293, 645, 470, 93), Color(BASE, 0.94), BORDER, 9)
 	center_title = label(center_box, Rect2(12, 9, 446, 40), "", 26, MINT, HORIZONTAL_ALIGNMENT_CENTER)
 	center_detail = label(center_box, Rect2(12, 49, 446, 29), "", 16, SUBTLE, HORIZONTAL_ALIGNMENT_CENTER)
+	build_character_picker()
 	recap = panel(game_layer, Rect2(44, 164, 272, 261), Color(BASE, 0.95))
 	label(recap, Rect2(16, 10, 242, 28), "직전 라운드 보상", 17)
 	label(recap, Rect2(16, 40, 242, 22), "순위 · 이름              킬 / 피해 / 골드", 13, SUBTLE)
@@ -297,6 +301,37 @@ func build_game() -> void:
 	for index in range(Rules.CAPACITY):
 		recap_rows.append(label(recap, Rect2(16, 72 + index * 28, 240, 27), "", 14, GOLD))
 	build_picker()
+
+
+func build_character_picker() -> void:
+	character_picker = panel(game_layer, Rect2(118, 178, 844, 444), BASE)
+	character_picker.hide()
+	label(character_picker, Rect2(24, 16, 796, 38), "캐릭터 선택", 25)
+	for choice in range(Rules.CHARACTER_NAMES.size()):
+		var column := choice % 3
+		@warning_ignore("integer_division")
+		var row := choice / 3
+		var card := panel(character_picker, Rect2(24 + column * 268, 65 + row * 180, 260, 172), TILE)
+		if DisplayServer.get_name() != "headless":
+			var preview := CombatView.new()
+			preview.variant = choice
+			card.add_child(preview)
+			preview.size = Vector2i(192, 192)
+			preview.camera.position = Vector3(2.0, 1.75, 3.8)
+			preview.camera.look_at(Vector3(0, 0.94, 0))
+			preview.camera.size = 2.15
+			preview.robot.pose_walk(0.0, 0.0, 0.0)
+			var portrait := TextureRect.new()
+			portrait.texture = preview.get_texture()
+			portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			portrait.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			position_ui(portrait, card, Rect2(66, 3, 128, 128))
+		var select_button := button(card, Rect2(8, 128, 244, 36), Rules.CHARACTER_NAMES[choice],
+			func(): game.select_character(choice))
+		select_button.add_theme_stylebox_override("disabled", style(Color("#183135"), MINT, 8))
+		select_button.add_theme_color_override("font_disabled_color", MINT)
+		character_buttons.append(select_button)
 
 
 func build_picker() -> void:
@@ -465,9 +500,7 @@ func update_view(state: Dictionary, screen: int, local_id: int, status: String,
 	var outside: bool = phase == Match.FIGHT and local.get("alive", false) and Rules.square_extent(local_pos) > state.half_side
 	if outside:
 		arena_hint.text = "장외  ·  안전선 안으로 복귀하세요."
-	if phase == Match.FIGHT and elapsed >= 75:
-		arena_hint.text = "과부하  ·  모든 생존자의 체력이 감소합니다."
-	arena_hint.add_theme_color_override("font_color", AMBER if outside or (phase == Match.FIGHT and elapsed >= 75) else SUBTLE)
+	arena_hint.add_theme_color_override("font_color", AMBER if outside else SUBTLE)
 	gear_hint.visible = phase == Match.FIGHT and local.get("alive", false) and not local.equipment.is_empty()
 	if gear_hint.visible:
 		var names := PackedStringArray()
@@ -481,6 +514,12 @@ func update_view(state: Dictionary, screen: int, local_id: int, status: String,
 		gear_hint.text = " · ".join(names)
 	center_box.position.x = 485.0 if compact else 305.0
 	center_box.visible = phase != Match.FIGHT or not local.get("alive", false)
+	character_picker.visible = phase == Match.LOBBY and not local.is_empty()
+	if character_picker.visible:
+		for choice in range(character_buttons.size()):
+			var selected: bool = local.character == choice
+			character_buttons[choice].disabled = selected
+			character_buttons[choice].text = Rules.CHARACTER_NAMES[choice] + (" · 선택됨" if selected else "")
 	match phase:
 		Match.LOBBY:
 			center_title.text = "대기실"
@@ -554,7 +593,8 @@ func update_sidebar(state: Dictionary, phase: int, players: Dictionary, local: D
 		Match.LOBBY:
 			change_button.text = "대전 시작"
 			sidebar_hint.text = status if not status.is_empty() else (
-				"친구에게 호스트 주소와 포트를 알려주세요." if copy_button.visible else "호스트가 시작하기를 기다리는 중")
+				"친구에게 호스트 주소와 포트를 알려주세요." if copy_button.visible else
+				("캐릭터를 고른 뒤 대전을 시작하세요." if is_host else "호스트가 시작하기를 기다리는 중"))
 		Match.SHOP:
 			change_button.text = "준비 취소" if ready else "구매 완료 · 준비"
 			var ready_count := players.values().filter(func(player: Dictionary): return player.ready).size()
@@ -588,7 +628,7 @@ func update_sidebar(state: Dictionary, phase: int, players: Dictionary, local: D
 			if phase == Match.RESULTS:
 				details = "%d승   %d킬   %d 피해" % [player.wins, player.total_kills, player.total_damage]
 			elif phase == Match.LOBBY:
-				details = "호스트" if id == 1 else ("훈련 봇" if id < 0 else "참가")
+				details = Rules.CHARACTER_NAMES[player.character]
 			if team >= 0:
 				details = "%s  ·  %s" % [Rules.TEAM_NAMES[team], details]
 			roster[index].text = "●  %s    ·    %s" % [player.name, details]

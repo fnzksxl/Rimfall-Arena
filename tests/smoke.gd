@@ -38,8 +38,14 @@ func new_room_tree(label: String) -> Node:
 
 func test_rules() -> void:
 	check(pow(2.0 * Rules.HALF_SIDE, 2.0) > 4.0 * PI * pow(390.0, 2.0), "map area is over four times v0.2")
-	check(Rules.half_side_at(26.0) == Rules.HALF_SIDE and Rules.half_side_at(75.0) == 68.0,
-		"square closes before overload")
+	check(Rules.half_side_at(26.0) == 700.0 and Rules.half_side_at(50.5) == 460.0
+		and Rules.half_side_at(75.0) == 220.0 and Rules.half_side_at(90.0) == 220.0,
+		"safe area shrinks steadily and stays 440 units wide after 75 seconds")
+	check(is_equal_approx(Rules.knockback_multiplier(0.0), 1.24)
+		and Rules.knockback_multiplier(120.0) > 1.24
+		and Rules.knockback_multiplier(240.0) - Rules.knockback_multiplier(120.0)
+			< Rules.knockback_multiplier(120.0) - 1.24,
+		"knockback starts stronger and its gains taper at higher impact")
 	var game := Match.new()
 	game.add_player(1, "One")
 	game.add_player(2, "Two")
@@ -134,6 +140,11 @@ func test_projectiles() -> void:
 	game.cast(1, Rules.BASIC, Vector2(120, 0))
 	game.advance(0.70)
 	check(game.players[2].hp == 92.0, "wider pulse hits within its new width")
+	game.reset_player(game.players[1], Vector2(-120, 0))
+	game.reset_player(game.players[2], Vector2(120, 22.5))
+	game.cast(1, Rules.BASIC, Vector2(120, 0))
+	game.advance(0.70)
+	check(game.players[2].hp == 100.0, "pulse grazes past the smaller fighter hitbox")
 	game.shots.clear()
 	game.half_side = 220.0
 	var pulse: Dictionary = Rules.skill(Rules.BASIC, 0).shot
@@ -420,6 +431,28 @@ func test_extended_casts() -> void:
 	check(pilot.kick.y < 0.0 and pilot.step_left == 0.0 and not Match.can_cast(pilot, Rules.MOVE), "double step gives one directed recast")
 
 
+func test_repel() -> void:
+	var game := Match.new()
+	for id in range(1, 4):
+		game.add_player(id, "Pilot %d" % id)
+	game.start_match()
+	game.buy(1, Rules.E, 1)
+	game.advance(Rules.SHOP_TIME)
+	game.advance(3.0)
+	game.players[1].p = Vector2.ZERO
+	game.players[2].p = Vector2(148.0, 0)
+	game.players[3].p = Vector2(0, 105.0)
+	game.cast(1, Rules.E, Vector2.RIGHT)
+	game.players[1].p = Vector2(60.0, 0)
+	game.resolve_strikes(0.10)
+	check(game.strikes[0].p == game.players[1].p and game.players[2].hp == 100.0,
+		"repel telegraph follows the caster before firing")
+	game.resolve_strikes(0.07)
+	check(game.players[2].hp < 100.0 and game.players[2].kick.x > 0.0
+		and game.players[1].hp == 100.0 and game.players[3].hp == 100.0,
+		"repel pushes nearby enemies from the new center and misses distant targets")
+
+
 func test_tactical_casts() -> void:
 	var game := Match.new()
 	for id in range(1, 5):
@@ -567,6 +600,12 @@ func test_practice_bots() -> void:
 	var room := new_room_tree("Practice")
 	room.practice("연습", 5)
 	var game: RefCounted = room.sim
+	check(game.phase == Match.LOBBY, "practice opens character selection before the shop")
+	room.hud.character_buttons[4].pressed.emit()
+	check(game.players[1].character == 4, "War Machine button sets the practice player's appearance")
+	room.primary_action()
+	check(game.players[1].character == 4 and not game.select_character(1, 3),
+		"appearance persists and is locked after the lobby")
 	check(game.players.size() == 6 and game.phase == Match.SHOP, "five sparring bots fill a solo room")
 	for id in range(1, 6):
 		check(game.players[-id].ready and game.players[-id].levels[Rules.Q] == 1, "every bot shops and readies")
@@ -648,6 +687,9 @@ func test_network() -> void:
 	if not await wait_for(func(): return client.state.get("players", {}).size() == 2, "lobby replication over ENet"):
 		return
 	var client_id: int = client.own_id
+	client.hud.character_buttons[5].pressed.emit()
+	await wait_for(func(): return (client.state.players[client_id].character == 5
+		and server.sim.players[client_id].character == 5), "Black Panther choice replicates through the lobby")
 	server.hud.change_button.pressed.emit()
 	if not await wait_for(func(): return client.state.phase == Match.SHOP, "host starts shop"):
 		return
@@ -829,6 +871,7 @@ func run() -> void:
 	test_equipment()
 	test_combat_gear()
 	test_extended_casts()
+	test_repel()
 	test_tactical_casts()
 	test_cloak_collision()
 	test_practice_bots()

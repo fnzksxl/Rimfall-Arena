@@ -2,6 +2,7 @@ extends Node2D
 
 const Rules = preload("res://rules.gd")
 const Match = preload("res://match.gd")
+const CombatView = preload("res://assets/robot/combat_view.gd")
 const INK := Color("#09131d")
 const MINT := Color("#79f2db")
 const AMBER := Color("#ffa574")
@@ -14,6 +15,8 @@ var own_id := 1
 var menu := true
 var clock := 0.0
 var fighter_positions: Dictionary = {}
+var fighter_steps: Dictionary = {}
+var combat_views: Dictionary = {}
 var shot_positions: Dictionary = {}
 var last_epoch := -1
 var followed_id := 0
@@ -38,10 +41,12 @@ func _process(delta: float) -> void:
 	if epoch != last_epoch:
 		if phase != Match.FIGHT:
 			fighter_positions.clear()
+			fighter_steps.clear()
 		shot_positions.clear()
 		last_epoch = epoch
 	var blend := 1.0 - exp(-delta * 29.0)
 	var players: Dictionary = state.get("players", {})
+	var current_steps := {}
 	for id: int in players:
 		if concealed(id, players[id]):
 			fighter_positions.erase(id)
@@ -49,6 +54,13 @@ func _process(delta: float) -> void:
 		var pos: Vector2 = players[id].p
 		var shown: Vector2 = fighter_positions.get(id, pos)
 		fighter_positions[id] = pos if shown.distance_squared_to(pos) > 240.0 * 240.0 else shown.lerp(pos, blend)
+		if phase == Match.FIGHT and players[id].alive:
+			var walk: Vector2 = players[id].walk
+			var step: float = fighter_steps.get(id, 0.0)
+			current_steps[id] = fposmod(step + walk.length() * delta * TAU / 64.0, TAU)
+	fighter_steps = current_steps
+	if DisplayServer.get_name() != "headless":
+		update_combat_views(phase, players)
 	update_camera(phase, players, delta)
 	var current_shots := {}
 	for shot: Dictionary in state.get("shots", []):
@@ -56,6 +68,36 @@ func _process(delta: float) -> void:
 		current_shots[shot.id] = shown.lerp(shot.p, blend)
 	shot_positions = current_shots
 	queue_redraw()
+
+
+func update_combat_views(phase: int, players: Dictionary) -> void:
+	for id: int in combat_views.keys():
+		var player: Dictionary = players.get(id, {})
+		if phase not in [Match.COUNTDOWN, Match.FIGHT] or not player.get("alive", false) or concealed(id, player):
+			combat_views[id].queue_free()
+			combat_views.erase(id)
+	if phase not in [Match.COUNTDOWN, Match.FIGHT]:
+		return
+	for id: int in players:
+		var player: Dictionary = players[id]
+		if not player.alive or concealed(id, player):
+			continue
+		var view: CombatView = combat_views.get(id)
+		if view == null:
+			view = CombatView.new()
+			view.variant = player.character
+			add_child(view)
+			combat_views[id] = view
+		var point: Vector2 = fighter_positions.get(id, player.p)
+		view.update_pose(player, fighter_facing(id, player, point, phase),
+			fighter_steps.get(id, 0.0), clock, state.elapsed)
+
+
+func fighter_facing(id: int, player: Dictionary, point: Vector2, phase: int) -> Vector2:
+	if id == own_id and phase == Match.FIGHT and not world_target().is_equal_approx(point):
+		return point.direction_to(world_target())
+	var facing: Vector2 = player.aim
+	return Vector2.DOWN if facing.is_zero_approx() else facing
 
 
 func concealed(id: int, player: Dictionary) -> bool:
@@ -139,11 +181,9 @@ func draw_backdrop() -> void:
 	backdrop.draw_line(Vector2(0, -18), Vector2(0, 18), MINT.darkened(0.40), 1.5, true)
 
 
-func draw_boundary(half_side: float, danger: bool) -> void:
+func draw_boundary(half_side: float) -> void:
 	var outer := Rules.HALF_SIDE
 	var boundary := AMBER if half_side < outer - 2.0 else MINT
-	if danger:
-		boundary = Color("#ff806b").lerp(AMBER, (sin(clock * 9.0) + 1.0) * 0.5)
 	if half_side < outer:
 		var tint := Color(0.84, 0.21, 0.12, 0.17)
 		var width := outer - half_side
@@ -160,14 +200,13 @@ func _draw() -> void:
 	var phase: int = state.get("phase", Match.LOBBY)
 	var fight := phase in [Match.FIGHT, Match.COUNTDOWN]
 	var half_side: float = state.half_side if fight else Rules.HALF_SIDE
-	var danger: bool = fight and state.get("elapsed", 0.0) >= 75.0
-	draw_boundary(half_side, danger)
+	draw_boundary(half_side)
 	if not fight:
 		if menu:
 			for index in range(3):
 				var angle := clock * 0.30 + index * TAU / 3.0
 				var point := Vector2.from_angle(angle) * (360.0 + 50 * index)
-				draw_fighter(point, Vector2.from_angle(angle + 1.65), Rules.COLORS[index], false, 0.0, 0.0)
+				draw_fighter(point, Vector2.from_angle(angle + 1.65), Rules.COLORS[index], 0.0, 0.0)
 		return
 	for strike: Dictionary in state.strikes:
 		var tint: Color = Rules.SLOTS[strike.slot].color
@@ -206,9 +245,8 @@ func _draw() -> void:
 			continue
 		var point: Vector2 = fighter_positions.get(id, player.p)
 		var own := id == own_id
-		var facing: Vector2 = player.aim
-		if own and phase == Match.FIGHT and not world_target().is_equal_approx(point):
-			facing = point.direction_to(world_target())
+		var facing := fighter_facing(id, player, point, phase)
+		var view: CombatView = combat_views.get(id)
 		var tint: Color = Rules.TEAM_COLORS[player.team] if player.team >= 0 else Rules.COLORS[player.color]
 		if player.anchor_left > 0.0:
 			var anchor_color: Color = Rules.SLOTS[Rules.F].color
@@ -224,7 +262,7 @@ func _draw() -> void:
 		if player.surge_left > 0.0 or player.surge_wait > 0.0:
 			var surge_color: Color = Rules.SLOTS[Rules.F].color
 			draw_arc(point, 25.0, clock * 3.2, clock * 3.2 + 2.4, 18, surge_color, 2.0, true)
-		if Rules.square_extent(player.p) > half_side or danger:
+		if Rules.square_extent(player.p) > half_side:
 			draw_circle(point, 26.0 + sin(clock * 13.0) * 2.0, Color("#ff8a68"), false, 2.0, true)
 		if player.charge > 0.0:
 			var charge_color: Color = Rules.SLOTS[Rules.MOVE].color
@@ -251,9 +289,13 @@ func _draw() -> void:
 				if Rules.square_extent(player.p + offset) > Rules.MAP_HALF_SIDE:
 					continue
 				var decoy_tint := tint.darkened(0.35) if own else tint
-				draw_fighter(point + offset, facing, decoy_tint, false, player.guard, player.flash)
+				draw_fighter(point + offset, facing, decoy_tint, player.guard, player.flash,
+					player.walk, fighter_steps.get(id, 0.0), view)
 				draw_tag(point + offset, player, decoy_tint)
-		draw_fighter(point, facing, tint, own, player.guard, player.flash)
+		draw_fighter(point, facing, tint, player.guard, player.flash,
+			player.walk, fighter_steps.get(id, 0.0), view)
+		if view != null and clock - view.fire_clock < CombatView.MUZZLE_TIME:
+			draw_muzzle(point, player.fire_aim, view)
 		draw_tag(point, player, tint)
 	for fx: Dictionary in state.effects:
 		var progress: float = 1.0 - fx.left / fx.duration
@@ -337,22 +379,61 @@ func draw_shot(shot: Dictionary) -> void:
 		draw_circle(point, radius * 0.44, tint.lightened(0.6), true, -1.0, true)
 
 
-func draw_fighter(point: Vector2, facing: Vector2, tint: Color, own: bool, guard: float, flash: float) -> void:
-	var side := facing.orthogonal()
-	draw_circle(point + Vector2(0, 5), 20, Color(0.01, 0.035, 0.05, 0.78), true, -1.0, true)
-	draw_circle(point, 22, Color(tint, 0.12), true, -1.0, true)
-	draw_circle(point, 17, tint.darkened(0.63), true, -1.0, true)
-	draw_circle(point, 17, Color(tint, 0.83), false, 1.5, true)
-	var armor := PackedVector2Array([point + facing * 19, point + facing * 3 + side * 10,
-		point - facing * 9 + side * 9, point - facing * 13, point - facing * 9 - side * 9, point + facing * 3 - side * 10])
-	draw_colored_polygon(armor, Color("#f7ffff") if flash > 0.0 else tint)
-	draw_colored_polygon(PackedVector2Array([point + facing * 9, point + side * 5, point - facing * 5,
-		point - side * 5]), tint.darkened(0.73))
-	if own:
-		draw_arc(point, 23, facing.angle() - 0.55, facing.angle() + 0.55, 16, Color("#ecfff9"), 2.8, true)
+func draw_fighter(point: Vector2, facing: Vector2, tint: Color, guard: float, flash: float,
+		walk := Vector2.ZERO, step := 0.0, view: CombatView = null) -> void:
+	if view != null:
+		var size := Vector2.ONE * CombatView.MODEL_SIZE
+		var modulation := Color.WHITE.lerp(Color("#ffa7a4"), 0.55) if flash > 0.0 else Color.WHITE
+		draw_texture_rect(view.get_texture(), Rect2(point - size * 0.5, size), false, modulation)
+	else:
+		draw_flat_robot(point, facing, tint, flash, walk, step)
 	if guard > 0.0:
 		draw_circle(point, 29, Color(Rules.SLOTS[Rules.F].color, 0.17), true, -1.0, true)
 		draw_circle(point, 29, Rules.SLOTS[Rules.F].color, false, 2.5, true)
+
+
+func draw_muzzle(point: Vector2, direction: Vector2, view: CombatView) -> void:
+	var fade := 1.0 - (clock - view.fire_clock) / CombatView.MUZZLE_TIME
+	var origin := point + view.muzzle_offset()
+	var end := point + direction * 22.0
+	var tint: Color = CombatView.FLASH_COLORS[view.variant]
+	if view.robot.look == CombatView.Robot.Look.SPIDER_MAN:
+		for strand: float in [-1.0, 1.0]:
+			draw_line(origin, end + direction.orthogonal() * strand * 4.0, Color(tint, fade), 1.4, true)
+	elif view.robot.look == CombatView.Robot.Look.BLACK_PANTHER:
+		var angle := direction.angle()
+		for claw in range(3):
+			draw_arc(origin - direction * 5.0, 8.0 + claw * 3.0, angle - 0.85,
+				angle + 0.79, 10, Color(tint, fade), 1.5, true)
+	else:
+		draw_circle(origin, 4.5 + (1.0 - fade) * 5.0, Color(tint, fade * 0.38), true, -1.0, true)
+		draw_line(origin, end, Color(tint, fade), 2.6 if view.robot.look == CombatView.Robot.Look.VISION else 3.7, true)
+		draw_circle(origin, 2.1, Color(tint.lightened(0.55), fade), true, -1.0, true)
+
+
+func draw_flat_robot(point: Vector2, facing: Vector2, tint: Color, flash: float, walk: Vector2, step: float) -> void:
+	var side := facing.orthogonal()
+	var stride := clampf(walk.length() / Rules.WALK_SPEED, 0.0, 1.0)
+	var travel := walk.normalized()
+	var armor_color := Color("#f7ffff") if flash > 0.0 else tint
+	for leg: float in [-1.0, 1.0]:
+		var hip := point + side * (leg * 7.0) - facing * 3.0
+		var foot := point + side * (leg * 9.0) - facing * 5.0 + travel * (cos(step) * leg * stride * 7.0)
+		var lift := maxf(0.0, sin(step) * leg) * stride
+		draw_line(hip, foot, Color("#303946"), 4.0, true)
+		draw_line(foot - facing * 3.0, foot + facing * 3.0, armor_color.darkened(0.45 - lift * 0.23), 5.0, true)
+	var torso := point + travel * (sin(step * 2.0) * stride)
+	for shoulder: float in [-1.0, 1.0]:
+		var joint := torso + side * (shoulder * 9.0)
+		draw_line(joint - facing * 4.0, joint + facing * 3.0, armor_color, 4.5, true)
+		draw_circle(joint, 1.5, Color("#303946"), true, -1.0, true)
+	draw_colored_polygon(PackedVector2Array([torso + facing * 15.0,
+		torso + facing * 5.0 + side * 6.0, torso - facing * 6.0 + side * 5.0,
+		torso - facing * 9.0, torso - facing * 6.0 - side * 5.0,
+		torso + facing * 5.0 - side * 6.0]), Color("#9aabb6") if flash > 0.0 else Color("#414c58"))
+	for eye: float in [-1.0, 1.0]:
+		draw_line(torso + facing * 8.0 + side * (eye * 1.8),
+			torso + facing * 6.0 + side * (eye * 4.5), Color("#ff665f"), 1.5, true)
 
 
 func draw_tag(point: Vector2, player: Dictionary, tint: Color) -> void:

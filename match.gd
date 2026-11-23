@@ -63,10 +63,18 @@ func add_player(id: int, nickname: String) -> void:
 	if mode == TEAM_MATCH:
 		var counts := team_counts(players)
 		team = 0 if counts[0] <= counts[1] else 1
-	players[id] = {"name": nickname, "color": color, "team": team, "wins": 0, "total_kills": 0,
+	players[id] = {"name": nickname, "color": color, "character": color % Rules.CHARACTER_NAMES.size(),
+		"team": team, "wins": 0, "total_kills": 0,
 		"total_damage": 0, "ready": false}
 	reset_loadout(players[id])
 	reset_player(players[id], Vector2.ZERO)
+
+
+func select_character(id: int, choice: int) -> bool:
+	if phase != LOBBY or not players.has(id) or choice < 0 or choice >= Rules.CHARACTER_NAMES.size():
+		return false
+	players[id].character = choice
+	return true
 
 
 func switch_team(id: int) -> void:
@@ -113,6 +121,7 @@ func reset_player(player: Dictionary, spawn: Vector2) -> void:
 		"gear_time": 0.0, "gear_used": false, "shield_used": false, "last_hit": 0, "last_hit_at": -99.0,
 		"anchor_left": 0.0, "anchor_pos": Vector2.ZERO, "step_left": 0.0,
 		"surge_wait": 0.0, "surge_left": 0.0, "windup": 0.0, "windup_aim": Vector2.RIGHT,
+		"fire_id": 0, "fire_at": -99.0, "fire_aim": Vector2.RIGHT,
 		"root": 0.0, "jam": 0.0, "cloak": 0.0, "mirror": 0.0, "mirror_mask": 0, "mirror_axis": Vector2.RIGHT,
 		"link_target": 0, "link_ticks": 0, "link_at": 0.0, "link_damage": 0,
 		"cooldowns": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}, true)
@@ -298,7 +307,7 @@ func cast(id: int, slot: int, target: Vector2) -> void:
 		"mark":
 			add_strike(id, slot, player.p + offset.limit_length(330.0), 46.0, 0.70, 24, 505.0, level)
 		"repel":
-			add_strike(id, slot, player.p, 64.0, 0.33, 16, 525.0, level)
+			add_strike(id, slot, player.p, 84.0, 0.16, 16, 525.0, level, false, true)
 		"fissure":
 			for index in range(3):
 				var pos: Vector2 = player.p + direction * (85.0 + index * 85.0)
@@ -371,6 +380,7 @@ func cast(id: int, slot: int, target: Vector2) -> void:
 func shoot(id: int, slot: int, direction: Vector2, origin: Vector2, profile: Dictionary, level: int) -> void:
 	serial += 1
 	var shooter: Dictionary = players.get(id, {})
+	shooter.merge({"fire_id": serial, "fire_at": elapsed, "fire_aim": direction}, true)
 	var speed_factor := Rules.PROJECTILE_SPEED_SCALE * Rules.equipment_factor(shooter, "shot_speed")
 	var speed: float = profile.speed * speed_factor
 	shots.append({"id": serial, "owner": id, "p": origin.clamp(-MAP_EDGE, MAP_EDGE),
@@ -383,8 +393,9 @@ func shoot(id: int, slot: int, direction: Vector2, origin: Vector2, profile: Dic
 
 
 func add_strike(id: int, slot: int, pos: Vector2, size: float, delay: float,
-	damage: int, force: float, level: int, pull := false) -> void:
+	damage: int, force: float, level: int, pull := false, follow_owner := false) -> void:
 	strikes.append({"owner": id, "slot": slot, "p": pos, "left": delay, "duration": delay, "pull": pull,
+		"follow_owner": follow_owner,
 		"size": size + (level - 1) * 5.0, "damage": Rules.attack_damage(damage + (level - 1) * 4),
 		"force": force + (level - 1) * 35.0})
 
@@ -536,13 +547,12 @@ func step_fight(delta: float) -> void:
 		player.gear_time = maxf(0.0, player.gear_time - delta)
 		var rate := Rules.OUTSIDE_DPS * Rules.equipment_factor(player, "outside") * (
 			1.0 - Rules.EMERGENCY_REDUCTION * protected_fraction) if outside else 0.0
-		var overload := Rules.OVERLOAD_DPS if elapsed >= 75.0 else 0.0
-		player.hp -= maxf(rate, overload) * delta
-		if not outside and overload == 0.0:
+		player.hp -= rate * delta
+		if not outside:
 			var regen_time := clampf(elapsed - player.last_hit_at - 3.0, 0.0, delta)
 			player.hp = minf(100.0, player.hp + regen_time * Rules.equipment_amount(player, "regen"))
 		if player.hp <= 0.0:
-			eliminate(id, "장외 탈락" if outside else "과부하 탈락")
+			eliminate(id, "장외 탈락")
 		else:
 			alive.append(id)
 	if alive.size() <= 1 or (mode == TEAM_MATCH and alive.all(func(id: int): return players[id].team == players[alive[0]].team)):
@@ -782,6 +792,12 @@ func reflect_shot(shot: Dictionary, owner: int, time: float) -> Dictionary:
 func resolve_strikes(delta: float) -> void:
 	for index in range(strikes.size() - 1, -1, -1):
 		var strike := strikes[index]
+		if strike.get("follow_owner", false):
+			var caster: Dictionary = players.get(strike.owner, {})
+			if not caster.get("alive", false):
+				strikes.remove_at(index)
+				continue
+			strike.p = caster.p
 		strike.left -= delta
 		if strike.left > 0.0:
 			continue
@@ -993,6 +1009,9 @@ func snapshot(viewer := 0) -> Dictionary:
 			if is_same(visible_players, players):
 				visible_players = players.duplicate()
 			var hidden := player.duplicate()
+			hidden.erase("fire_id")
+			hidden.erase("fire_at")
+			hidden.erase("fire_aim")
 			hidden.merge({"p": Vector2.ZERO, "aim": Vector2.RIGHT, "walk": Vector2.ZERO, "kick": Vector2.ZERO,
 				"move": Vector2.ZERO, "anchor_left": 0.0, "anchor_pos": Vector2.ZERO}, true)
 			visible_players[id] = hidden

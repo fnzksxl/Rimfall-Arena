@@ -31,6 +31,14 @@ static func encode(game: RefCounted, viewer := 0) -> PackedByteArray:
 		buffer.put_u32(id)
 		put_position(buffer, Vector2.ZERO if concealed else player.p)
 		buffer.put_16(0 if concealed else roundi(player.aim.angle() * 8000.0))
+		var walk: Vector2 = Vector2.ZERO if concealed else player.walk
+		buffer.put_16(roundi(walk.x))
+		buffer.put_16(roundi(walk.y))
+		var fire_id: int = player.fire_id if not concealed and game.elapsed - player.fire_at < 0.6 else 0
+		buffer.put_u32(fire_id)
+		if fire_id != 0:
+			buffer.put_float(player.fire_at)
+			buffer.put_16(roundi(player.fire_aim.angle() * 8000.0))
 		buffer.put_u16(roundi(player.hp * 100.0))
 		buffer.put_u8(roundi(player.impact))
 		buffer.put_u8(int(player.alive))
@@ -110,6 +118,14 @@ static func apply(data: PackedByteArray, state: Dictionary) -> void:
 		var player: Dictionary = state.players.get(id, {})
 		player.p = get_position(buffer)
 		player.aim = Vector2.from_angle(buffer.get_16() / 8000.0)
+		player.walk = Vector2(buffer.get_16(), buffer.get_16())
+		player.fire_id = buffer.get_u32()
+		if player.fire_id != 0:
+			player.fire_at = buffer.get_float()
+			player.fire_aim = Vector2.from_angle(buffer.get_16() / 8000.0)
+		else:
+			player.fire_at = -99.0
+			player.fire_aim = Vector2.RIGHT
 		player.hp = buffer.get_u16() / 100.0
 		player.impact = float(buffer.get_u8())
 		player.alive = bool(buffer.get_u8())

@@ -6,7 +6,7 @@ const Arena = preload("res://arena.gd")
 const Hud = preload("res://hud.gd")
 const Sounds = preload("res://sounds.gd")
 const Motion = preload("res://motion.gd")
-const VERSION := 16
+const VERSION := 19
 const CAST_KEYS := [KEY_Q, KEY_E, KEY_R, KEY_F, KEY_SPACE]
 const CAST_SOUNDS := [Rules.Cue.FIRE, Rules.Cue.POWER, Rules.Cue.MARK, Rules.Cue.POWER, Rules.Cue.GUARD, Rules.Cue.DASH]
 enum { MENU, CONNECTING, ROOM }
@@ -101,7 +101,6 @@ func practice(nickname: String, bot_count := 1, mode := Match.FREE_FOR_ALL) -> v
 		count |= 1
 	for index in range(1, count + 1):
 		sim.add_player(-index, "스파링 봇 %d" % index if count > 1 else "스파링 봇")
-	sim.start_match()
 	state = sim.snapshot()
 
 
@@ -243,6 +242,22 @@ func switch_team() -> void:
 		broadcast_state(true)
 	else:
 		request_team_switch.rpc_id(1, state.epoch)
+
+
+func select_character(choice: int) -> void:
+	if screen != ROOM or state.get("phase") != Match.LOBBY:
+		return
+	if host:
+		if sim.select_character(own_id, choice):
+			broadcast_state(true)
+	else:
+		request_character.rpc_id(1, state.epoch, choice)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func request_character(epoch: int, choice: int) -> void:
+	if host and epoch == sim.epoch and sim.select_character(multiplayer.get_remote_sender_id(), choice):
+		broadcast_state(true)
 
 
 @rpc("any_peer", "call_remote", "reliable", 0)

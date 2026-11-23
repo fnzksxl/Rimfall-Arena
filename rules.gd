@@ -8,12 +8,14 @@ const TEAM_COLORS := [Color("#8dbbff"), Color("#ffaf81")]
 const START_GOLD := 220
 const SHOP_TIME := 25.0
 const HALF_SIDE := 700.0
+const FINAL_HALF_SIDE := 220.0
+const SHRINK_START := 26.0
+const SHRINK_END := 75.0
 const MAP_HALF_SIDE := 1440.0
 const SPAWN_DISTANCE := 290.0
 const WALK_SPEED := 105.0
 const OUTSIDE_DPS := 14.0
-const OVERLOAD_DPS := 12.0
-const BODY_RADIUS := 14.0
+const BODY_RADIUS := 13.0
 const MAX_IMPACT := 240.0
 const ATTACK_DAMAGE_SCALE := 0.75
 const PROJECTILE_SPEED_SCALE := 0.60
@@ -23,6 +25,7 @@ const EQUIPMENT_CAP := 3
 const EMERGENCY_GEAR := 1
 const SHIELD_GEAR := 8
 const MAX_CHOICES := 6
+const CHARACTER_NAMES := ["울트론", "아이언맨", "비전", "스파이더맨", "워 머신", "블랙 팬서"]
 const COLORS := [Color("#79f2db"), Color("#ffa574"), Color("#93aaff"),
 	Color("#f7dc72"), Color("#ef93c8"), Color("#adf097")]
 enum { BASIC, Q, E, R, F, MOVE, GEAR }
@@ -59,7 +62,7 @@ const SLOTS := [
 	]},
 	{"key": "E", "name": "범위 공격", "color": Color("#93aaff"), "price": 125, "options": [
 		{"id": "mark", "name": "낙뢰 표식", "cd": 9.0, "help": "조준 지점에 지연 폭발", "upgrade": "피해와 폭발 반경 증가"},
-		{"id": "repel", "name": "반발 고리", "cd": 8.2, "help": "발밑에서 파동 발생\n주변 상대를 밀어냄", "upgrade": "피해와 파동 반경 증가"},
+		{"id": "repel", "name": "반발 고리", "cd": 8.2, "help": "짧은 준비 후 내 위치에서\n주변 상대를 밀어냄", "upgrade": "피해와 파동 반경 증가"},
 		{"id": "fissure", "name": "균열선", "cd": 9.3, "help": "조준 방향의 세 지점이\n순서대로 폭발", "upgrade": "피해와 폭발 반경 증가"},
 		{"id": "scatter", "name": "분열 표식", "cd": 9.8, "help": "표식에서 조준 방향 기준\n네 방향으로 작은 탄 발사", "upgrade": "분열탄 피해와 넉백 증가",
 			"shot": {"speed": 565.0, "size": 5.0, "damage": 10, "gain": 2, "force": 255.0, "style": BOLT}},
@@ -143,13 +146,15 @@ static func attack_damage(base_damage: int) -> int:
 	return roundi(base_damage * ATTACK_DAMAGE_SCALE)
 
 static func half_side_at(elapsed: float) -> float:
-	return maxf(68.0, HALF_SIDE - maxf(0.0, elapsed - 26.0) * 15.7)
+	var progress := clampf(inverse_lerp(SHRINK_START, SHRINK_END, elapsed), 0.0, 1.0)
+	return lerpf(HALF_SIDE, FINAL_HALF_SIDE, progress)
 
 static func square_extent(point: Vector2) -> float:
 	return maxf(absf(point.x), absf(point.y))
 
 static func knockback_multiplier(impact: float) -> float:
-	return 1.0 + impact / 145.0
+	var progress := clampf(impact / MAX_IMPACT, 0.0, 1.0)
+	return 1.24 + 1.15 * progress / (1.0 + 0.35 * progress)
 
 static func award(rank: int) -> int:
 	return 100 + maxi(0, 45 - (rank - 1) * 15)
