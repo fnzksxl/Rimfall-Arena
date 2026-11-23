@@ -16,7 +16,7 @@ static func get_position(buffer: StreamPeerBuffer) -> Vector2:
 	return Vector2(buffer.get_float(), buffer.get_float())
 
 
-static func encode(game: RefCounted) -> PackedByteArray:
+static func encode(game: RefCounted, viewer := 0) -> PackedByteArray:
 	var buffer := StreamPeerBuffer.new()
 	buffer.put_float(game.left)
 	buffer.put_float(game.elapsed)
@@ -26,9 +26,11 @@ static func encode(game: RefCounted) -> PackedByteArray:
 	buffer.put_u8(game.players.size())
 	for id: int in game.players:
 		var player: Dictionary = game.players[id]
+		var concealed: bool = viewer != 0 and id != viewer and player.cloak > 0.0 and \
+			not Match.same_team(game.players.get(viewer, {}), player)
 		buffer.put_u32(id)
-		put_position(buffer, player.p)
-		buffer.put_16(roundi(player.aim.angle() * 8000.0))
+		put_position(buffer, Vector2.ZERO if concealed else player.p)
+		buffer.put_16(0 if concealed else roundi(player.aim.angle() * 8000.0))
 		buffer.put_u16(roundi(player.hp * 100.0))
 		buffer.put_u8(roundi(player.impact))
 		buffer.put_u8(int(player.alive))
@@ -38,8 +40,8 @@ static func encode(game: RefCounted) -> PackedByteArray:
 		buffer.put_u8(roundi(player.charge * 100.0))
 		buffer.put_u8(roundi(player.flash * 100.0))
 		buffer.put_u8(roundi(player.gear_time * 100.0))
-		buffer.put_u8(int(player.gear_used))
-		var anchor := roundi(player.anchor_left * 100.0)
+		buffer.put_u8(int(player.gear_used) | (int(player.shield_used) << 1))
+		var anchor := 0 if concealed else roundi(player.anchor_left * 100.0)
 		var windup := roundi(player.windup * 100.0)
 		buffer.put_u8(anchor)
 		if anchor > 0:
@@ -50,6 +52,13 @@ static func encode(game: RefCounted) -> PackedByteArray:
 		buffer.put_u8(roundi(player.step_left * 100.0))
 		buffer.put_u8(roundi(player.surge_wait * 100.0))
 		buffer.put_u8(roundi(player.surge_left * 100.0))
+		buffer.put_u8(ceili(player.cloak * 100.0))
+		buffer.put_u8(roundi(player.root * 100.0))
+		buffer.put_u8(roundi(player.jam * 100.0))
+		buffer.put_u8(player.mirror_mask)
+		if player.mirror_mask != 0:
+			buffer.put_16(roundi(player.mirror_axis.angle() * 8000.0))
+		buffer.put_32(player.link_target)
 		for cooldown: float in player.cooldowns:
 			buffer.put_u8(ceili(cooldown * COOLDOWN_TICKS))
 	buffer.put_u8(game.shots.size())
@@ -66,10 +75,13 @@ static func encode(game: RefCounted) -> PackedByteArray:
 		buffer.put_u8(ceili(strike.left * 100.0))
 		buffer.put_u8(strike.size)
 		buffer.put_u8(roundi(strike.duration * 100.0))
-		var flags: int = strike.slot | (0x80 if strike.pull else 0) | (0x40 if strike.get("scatter", false) else 0)
+		var flags: int = strike.slot | (0x80 if strike.pull else 0) | (0x40 if strike.get("scatter", false) else 0) | \
+			(0x20 if strike.has("repeats") else 0)
 		buffer.put_u8(flags)
-		if flags & 0x40:
+		if flags & 0x60:
 			buffer.put_16(roundi(strike.angle * 8000.0))
+		if flags & 0x20:
+			buffer.put_u8(strike.repeats)
 	var effect_count := clampi(floori((MOTION_PAYLOAD_BUDGET - buffer.get_size() - 1) / float(EFFECT_BYTES)), 0, game.effects.size())
 	buffer.put_u8(effect_count)
 	for index in range(game.effects.size() - effect_count, game.effects.size()):
@@ -105,7 +117,9 @@ static func apply(data: PackedByteArray, state: Dictionary) -> void:
 		player.charge = buffer.get_u8() / 100.0
 		player.flash = buffer.get_u8() / 100.0
 		player.gear_time = buffer.get_u8() / 100.0
-		player.gear_used = bool(buffer.get_u8())
+		var gear_flags := buffer.get_u8()
+		player.gear_used = bool(gear_flags & 1)
+		player.shield_used = bool(gear_flags & 2)
 		player.anchor_left = buffer.get_u8() / 100.0
 		if player.anchor_left > 0.0:
 			player.anchor_pos = get_position(buffer)
@@ -115,6 +129,13 @@ static func apply(data: PackedByteArray, state: Dictionary) -> void:
 		player.step_left = buffer.get_u8() / 100.0
 		player.surge_wait = buffer.get_u8() / 100.0
 		player.surge_left = buffer.get_u8() / 100.0
+		player.cloak = buffer.get_u8() / 100.0
+		player.root = buffer.get_u8() / 100.0
+		player.jam = buffer.get_u8() / 100.0
+		player.mirror_mask = buffer.get_u8()
+		if player.mirror_mask != 0:
+			player.mirror_axis = Vector2.from_angle(buffer.get_16() / 8000.0)
+		player.link_target = buffer.get_32()
 		var cooldowns: Array[float] = []
 		for slot in range(Rules.ACTIVE_SLOTS):
 			cooldowns.append(buffer.get_u8() / COOLDOWN_TICKS)
@@ -129,11 +150,13 @@ static func apply(data: PackedByteArray, state: Dictionary) -> void:
 		var strike := {"p": get_position(buffer), "left": buffer.get_u8() / 100.0,
 			"size": float(buffer.get_u8()), "duration": buffer.get_u8() / 100.0}
 		var flags := buffer.get_u8()
-		strike.slot = flags & 0x3f
+		strike.slot = flags & 0x1f
 		strike.pull = bool(flags & 0x80)
 		strike.scatter = bool(flags & 0x40)
-		if strike.scatter:
+		if flags & 0x60:
 			strike.angle = buffer.get_16() / 8000.0
+		if flags & 0x20:
+			strike.repeats = buffer.get_u8()
 		state.strikes.append(strike)
 	state.effects.clear()
 	for index in range(buffer.get_u8()):

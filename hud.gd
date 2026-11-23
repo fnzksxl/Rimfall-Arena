@@ -22,9 +22,13 @@ var port: LineEdit
 var host_button: Button
 var join_button: Button
 var practice_button: Button
+var mode_options: OptionButton
+var bot_options: OptionButton
 var menu_status: Label
 var sidebar: Panel
 var change_button: Button
+var team_button: Button
+var team_score_badge: Label
 var copy_button: Button
 var address_options: OptionButton
 var mute_button: Button
@@ -47,6 +51,9 @@ var picker: Panel
 var picker_slot := -1
 var picker_title: Label
 var picker_note: Label
+var picker_page := 0
+var picker_tabs: Array[Button] = []
+const GEAR_PAGE_SIZE := 5
 var option_cards: Array[Panel] = []
 var option_names: Array[Label] = []
 var option_meta: Array[Label] = []
@@ -175,16 +182,44 @@ func build_menu() -> void:
 	label(frame, Rect2(382, 273, 102, 24), "UDP 포트", 15, SUBTLE)
 	nickname = entry(frame, Rect2(38, 302, 327, 49), "", "플레이어 이름", 16)
 	port = entry(frame, Rect2(382, 302, 102, 49), "7410", "7410", 5)
-	host_button = button(frame, Rect2(38, 364, 446, 50), "친구 방 만들기", func():
-		game.host_game(nickname.text, port.text), true)
+	mode_options = selector(frame, Rect2(38, 364, 156, 50), "방과 연습전의 경기 방식")
+	mode_options.add_item("개인전", Match.FREE_FOR_ALL)
+	mode_options.add_item("팀전", Match.TEAM_MATCH)
+	mode_options.item_selected.connect(update_bot_options)
+	host_button = button(frame, Rect2(208, 364, 276, 50), "친구 방 만들기", func():
+		game.host_game(nickname.text, port.text, mode_options.get_selected_id()), true)
 	label(frame, Rect2(38, 430, 446, 24), "친구 방에 참가할 때 입력", 15, SUBTLE)
 	contact = entry(frame, Rect2(38, 459, 318, 49), "", "호스트 IP 주소", 70)
 	join_button = button(frame, Rect2(368, 459, 116, 49), "방 참가", join_room)
 	contact.text_submitted.connect(func(_value: String): join_room())
-	practice_button = button(frame, Rect2(38, 546, 446, 48), "봇과 연습", func():
-		game.practice(nickname.text))
+	bot_options = selector(frame, Rect2(38, 546, 156, 48), "연습전 스파링 봇 수")
+	practice_button = button(frame, Rect2(208, 546, 276, 48), "봇과 연습", func():
+		game.practice(nickname.text, bot_options.get_selected_id(), mode_options.get_selected_id()))
+	update_bot_options(mode_options.selected)
 	menu_status = label(frame, Rect2(38, 608, 446, 35), "", 15, AMBER)
 	label(menu_layer, Rect2(65, 794, 565, 34), "WASD 이동  ·  마우스 조준  ·  좌클릭 / Q / E / R / F / Space", 16, SUBTLE)
+
+
+func selector(parent: Control, rect: Rect2, accessible: String) -> OptionButton:
+	var control := OptionButton.new()
+	control.accessibility_name = accessible
+	control.add_theme_stylebox_override("normal", style(BASE, BORDER, 8))
+	control.add_theme_stylebox_override("hover", style(TILE, MINT, 8))
+	control.add_theme_stylebox_override("pressed", style(TILE, MINT, 8))
+	control.add_theme_font_size_override("font_size", 15)
+	position_ui(control, parent, rect)
+	return control
+
+
+func update_bot_options(_index: int) -> void:
+	var teams := mode_options.get_selected_id() == Match.TEAM_MATCH
+	bot_options.clear()
+	for count in range(1, Rules.CAPACITY, 2 if teams else 1):
+		var size := (count + 1) / 2
+		bot_options.add_item("봇 %d · %d 대 %d" % [count, size, size] if teams else "봇 %d마리" % count, count)
+	bot_options.select(1 if teams else 0)
+	host_button.text = "팀전 방 만들기" if teams else "개인전 방 만들기"
+	practice_button.text = "봇과 팀전 연습" if teams else "봇과 개인전 연습"
 
 
 func join_room() -> void:
@@ -199,6 +234,7 @@ func build_game() -> void:
 	label(header, Rect2(36, 15, 288, 41), "RIMFALL ARENA", 25)
 	round_badge = label(header, Rect2(322, 16, 240, 38), "", 18, MINT)
 	phase_badge = label(header, Rect2(588, 12, 355, 45), "", 22, TEXT, HORIZONTAL_ALIGNMENT_CENTER)
+	team_score_badge = label(header, Rect2(946, 15, 155, 39), "", 16, SUBTLE, HORIZONTAL_ALIGNMENT_CENTER)
 	mute_button = button(header, Rect2(1116, 14, 116, 40), "소리 켜짐", func(): game.toggle_audio())
 	button(header, Rect2(1244, 14, 120, 40), "방 나가기", func(): game.leave_game())
 
@@ -210,12 +246,9 @@ func build_game() -> void:
 	fill(sidebar, Rect2(21, 94, 324, 1), BORDER)
 	sidebar_hint = label(sidebar, Rect2(21, 541, 324, 25), "", 14, SUBTLE)
 	change_button = button(sidebar, Rect2(21, 574, 324, 52), "", func(): game.primary_action(), true)
+	team_button = button(sidebar, Rect2(21, 377, 324, 44), "", func(): game.switch_team())
 	copy_button = button(sidebar, Rect2(235, 490, 110, 44), "주소 복사", func(): game.copy_address(address_options.selected))
-	address_options = OptionButton.new()
-	address_options.add_theme_stylebox_override("normal", style(BASE, BORDER, 8))
-	address_options.add_theme_stylebox_override("hover", style(TILE, MINT, 8))
-	address_options.add_theme_font_size_override("font_size", 15)
-	position_ui(address_options, sidebar, Rect2(21, 490, 204, 44))
+	address_options = selector(sidebar, Rect2(21, 490, 204, 44), "호스트 주소")
 	for index in range(Rules.CAPACITY):
 		var line := label(sidebar, Rect2(23, 108 + index * 40, 317, 34), "", 17)
 		roster.append(line)
@@ -269,6 +302,11 @@ func build_picker() -> void:
 	picker_title = label(picker, Rect2(23, 16, 543, 36), "", 24)
 	button(picker, Rect2(827, 16, 75, 44), "닫기", close_picker)
 	picker_note = label(picker, Rect2(24, 55, 780, 25), "", 15, SUBTLE)
+	for page in range(2):
+		var tab := button(picker, Rect2(565 + page * 130, 16, 120, 44), "", func(): picker_page = page)
+		tab.add_theme_stylebox_override("disabled", style(Color("#183135"), MINT, 8))
+		tab.add_theme_color_override("font_disabled_color", MINT)
+		picker_tabs.append(tab)
 	for index in range(Rules.MAX_CHOICES):
 		var card := panel(picker, Rect2(22 + (index % 3) * 296, 92 + (index / 3) * 211, 286, 200), TILE, BORDER, 8)
 		option_cards.append(card)
@@ -293,17 +331,23 @@ func open_shop_slot(slot: int) -> void:
 		close_picker()
 		game.buy_slot(slot)
 	else:
+		var local: Dictionary = game.state.players.get(game.own_id, {})
+		picker_page = 0 if slot == Rules.GEAR else int(local.get("choices", Rules.BASE_CHOICES)[slot]) / Rules.MAX_CHOICES
 		picker_slot = slot
 
 
-func choose_option(choice: int) -> void:
-	if picker_slot >= 0 and not option_actions[choice].disabled:
+func choose_option(card_index: int) -> void:
+	if picker_slot >= 0 and option_cards[card_index].visible and not option_actions[card_index].disabled:
+		var choice: int = option_actions[card_index].get_meta("choice", -1)
+		if choice < 0:
+			return
 		var local: Dictionary = game.state.players.get(game.own_id, {})
 		if picker_slot == Rules.GEAR and choice in local.get("equipment", []):
 			game.sell_gear(choice)
 		else:
 			game.buy_slot(picker_slot, choice)
-		close_picker()
+		if picker_slot != Rules.GEAR:
+			close_picker()
 
 
 func close_picker() -> void:
@@ -322,17 +366,27 @@ func update_picker(phase: int, local: Dictionary) -> void:
 	var gear := picker_slot == Rules.GEAR
 	var level: int = 0 if gear else local.levels[picker_slot]
 	var selected: int = 0 if gear else local.choices[picker_slot]
-	for index in range(option_cards.size()):
-		option_cards[index].visible = index < slot.options.size()
+	var page_size := GEAR_PAGE_SIZE if gear else Rules.MAX_CHOICES
+	var start := picker_page * page_size
+	var count := mini(page_size, slot.options.size() - start)
+	for page in range(picker_tabs.size()):
+		picker_tabs[page].visible = slot.options.size() > page_size
+		picker_tabs[page].disabled = page == picker_page
+		picker_tabs[page].text = ["기동·장외", "방어·회복"][page] if gear else ("%d / %d 페이지" % [page + 1, picker_tabs.size()])
 	picker_title.text = "장비 상점" if gear else "%s  ·  %s" % [slot.key, slot.name]
 	picker_title.add_theme_color_override("font_color", slot.color)
 	picker_note.text = "%d/%d개 장착  ·  판매 시 구매가의 절반 반환" % [local.equipment.size(), Rules.EQUIPMENT_CAP] if gear else (
 		"후보 하나를 고르세요. 선택은 경기 종료까지 유지됩니다." if level == 0 else "이번 경기에서는 장착한 스킬을 강화할 수 있습니다.")
-	for index in range(slot.options.size()):
-		var data: Dictionary = slot.options[index]
-		var equipped: bool = index in local.equipment if gear else level > 0 and index == selected
+	for index in range(option_cards.size()):
+		option_cards[index].visible = index < count
+		if index >= count:
+			continue
+		var choice := start + index
+		var data: Dictionary = slot.options[choice]
+		var equipped: bool = choice in local.equipment if gear else level > 0 and choice == selected
 		var action := option_actions[index]
-		var cost := Rules.price(picker_slot, level, index)
+		action.set_meta("choice", choice)
+		var cost := Rules.price(picker_slot, level, choice)
 		option_icons[index].show_skill(data.id, slot.color)
 		option_names[index].text = data.name
 		option_names[index].add_theme_color_override("font_color", slot.color if equipped else TEXT)
@@ -340,13 +394,13 @@ func update_picker(phase: int, local: Dictionary) -> void:
 		if gear:
 			option_meta[index].text = "장착 중" if equipped else ""
 			var full: bool = local.equipment.size() >= Rules.EQUIPMENT_CAP
-			action.text = "판매 +%d G" % Rules.resale(index) if equipped else ("장비 칸 가득 참" if full else "구매 %d G" % cost)
+			action.text = "판매 +%d G" % Rules.resale(choice) if equipped else ("장비 칸 가득 참" if full else "구매 %d G" % cost)
 			action.disabled = not equipped and (full or local.gold < cost)
 			action.tooltip_text = data.help
 			continue
 		var maxed := equipped and level >= Rules.level_cap(picker_slot)
 		var locked := level > 0 and not equipped
-		var cd := Rules.cooldown(picker_slot, index, maxi(level, 1))
+		var cd := Rules.cooldown(picker_slot, choice, maxi(level, 1))
 		option_meta[index].text = "재사용 %.1f초%s" % [cd, "  ·  장착 중" if equipped else ""]
 		action.text = "선택 불가" if locked else ("최대 레벨" if maxed else "%s %d G" % ["강화" if equipped else "구매", cost])
 		action.disabled = locked or maxed or local.gold < cost
@@ -371,6 +425,8 @@ func update_view(state: Dictionary, screen: int, local_id: int, status: String,
 		host_button.disabled = screen == 1
 		join_button.disabled = screen == 1
 		practice_button.disabled = screen == 1
+		mode_options.disabled = screen == 1
+		bot_options.disabled = screen == 1
 		return
 	var phase: int = state.get("phase", Match.LOBBY)
 	var players: Dictionary = state.get("players", {})
@@ -380,12 +436,19 @@ func update_view(state: Dictionary, screen: int, local_id: int, status: String,
 	var elapsed := floori(state.get("elapsed", 0.0))
 	var compact := phase in [Match.COUNTDOWN, Match.FIGHT]
 	var active := 0
+	var team_active := [0, 0]
 	for player: Dictionary in players.values():
 		active += int(player.alive)
-	var mode := "연습전" if practice_mode else "친구 대전"
+		if player.alive and player.team >= 0:
+			team_active[player.team] += 1
+	var teams: bool = state.get("mode", Match.FREE_FOR_ALL) == Match.TEAM_MATCH
+	var mode := ("%s 연습전" % ("팀" if teams else "개인")) if practice_mode else ("친구 팀전" if teams else "친구 개인전")
 	round_badge.text = "%s    %02d / %02d" % [mode, round_no, Rules.ROUNDS] if round_no else mode
+	var survival := "블루 %d · 오렌지 %d" % team_active if teams else "%d명 생존" % active
 	phase_badge.text = ["대기실", "정비 시간  ·  %02d초" % remaining, "시작까지  %d" % remaining,
-		"%02d:%02d  ·  %d명 생존" % [elapsed / 60, elapsed % 60, active], "최종 결과"][phase]
+		"%02d:%02d  ·  %s" % [elapsed / 60, elapsed % 60, survival], "최종 결과"][phase]
+	team_score_badge.visible = teams and round_no > 0
+	team_score_badge.text = "라운드  %d : %d" % state.get("team_wins", [0, 0])
 	mute_button.text = "소리 꺼짐" if muted else "소리 켜짐"
 	sidebar.visible = not compact
 	var feed: Array = state.get("feed", [])
@@ -406,19 +469,19 @@ func update_view(state: Dictionary, screen: int, local_id: int, status: String,
 	if gear_hint.visible:
 		var names := PackedStringArray()
 		for choice: int in local.equipment:
-			names.append(Rules.skill(Rules.GEAR, choice).name)
+			var name_text: String = Rules.skill(Rules.GEAR, choice).name
+			if choice == Rules.EMERGENCY_GEAR:
+				name_text += " %.1f초" % local.gear_time if local.gear_time > 0.0 else (" 소진" if local.gear_used else " 대기")
+			if choice == Rules.SHIELD_GEAR:
+				name_text += " 소진" if local.shield_used else " 대기"
+			names.append(name_text)
 		gear_hint.text = " · ".join(names)
-		if Rules.EMERGENCY_GEAR in local.equipment:
-			if local.gear_time > 0.0:
-				gear_hint.text += "  ·  보호 %.1f초" % local.gear_time
-			else:
-				gear_hint.text += "  ·  사용 완료" if local.gear_used else "  ·  대기"
 	center_box.position.x = 485.0 if compact else 305.0
 	center_box.visible = phase != Match.FIGHT or not local.get("alive", false)
 	match phase:
 		Match.LOBBY:
 			center_title.text = "대기실"
-			center_detail.text = "2명 이상 모이면 호스트가 시작할 수 있습니다."
+			center_detail.text = "양 팀에 인원이 있고 인원 차이가 1명 이하면 시작합니다." if teams else "2명 이상 모이면 호스트가 시작할 수 있습니다."
 		Match.SHOP:
 			var winner: String = state.get("round_winner", "")
 			center_title.text = "첫 라운드 준비" if round_no == 1 else (
@@ -429,14 +492,17 @@ func update_view(state: Dictionary, screen: int, local_id: int, status: String,
 			center_detail.text = "라운드 %d  ·  곧 전투가 시작됩니다." % round_no
 		Match.FIGHT:
 			center_title.text = "탈락 · 관전 중"
-			center_detail.text = "생존자 %d명" % active
+			center_detail.text = survival
 		Match.RESULTS:
 			var winners: Array = state.get("winners", [])
-			center_title.text = "최종 우승  ·  %s" % winners[0] if winners.size() == 1 else "공동 우승"
+			center_title.text = "최종 우승  ·  %s" % winners[0] if winners.size() == 1 else ("공동 우승" if not winners.is_empty() else "경기 종료")
 			center_detail.text = "라운드 승수 → 총 킬 → 총 피해량"
+			if teams:
+				center_detail.text = "상대 팀 연결 종료" if state.get("team_forfeit", false) else "블루 %d승  ·  오렌지 %d승" % state.team_wins
 
-	self_title.text = local.get("name", "")
-	self_title.add_theme_color_override("font_color", Rules.COLORS[local.get("color", 0)])
+	var team: int = local.get("team", -1)
+	self_title.text = "%s · %s" % [Rules.TEAM_NAMES[team], local.get("name", "")] if team >= 0 else local.get("name", "")
+	self_title.add_theme_color_override("font_color", Rules.TEAM_COLORS[team] if team >= 0 else Rules.COLORS[local.get("color", 0)])
 	var hp: float = local.get("hp", 100.0) if phase in [Match.COUNTDOWN, Match.FIGHT] else 100.0
 	var impact: float = local.get("impact", 0.0) if phase in [Match.COUNTDOWN, Match.FIGHT] else 0.0
 	self_stats.text = "체력 %d  /  100     충격 %d%%" % [ceili(hp), roundi(impact)]
@@ -463,12 +529,21 @@ func update_view(state: Dictionary, screen: int, local_id: int, status: String,
 func update_sidebar(state: Dictionary, phase: int, players: Dictionary, local: Dictionary,
 	is_host: bool, status: String) -> void:
 	var shopping := phase == Match.SHOP
+	var mode: int = state.get("mode", Match.FREE_FOR_ALL)
+	var teams := mode == Match.TEAM_MATCH
 	var ready: bool = local.get("ready", false)
 	change_button.visible = shopping or (is_host and phase in [Match.LOBBY, Match.RESULTS])
-	change_button.disabled = phase == Match.LOBBY and players.size() < 2
+	change_button.disabled = phase == Match.LOBBY and not Match.can_start(players, mode)
+	team_button.visible = teams and phase == Match.LOBBY and not local.is_empty()
+	if team_button.visible:
+		var other: int = 1 - local.team
+		team_button.text = "%s으로 이동" % Rules.TEAM_NAMES[other]
+		team_button.disabled = Match.team_counts(players)[other] >= Rules.TEAM_SIZE
 	copy_button.visible = phase == Match.LOBBY and is_host and address_options.item_count > 0
 	address_options.visible = copy_button.visible
 	sidebar_title.text = ["참가자", "라운드 상점", "", "", "최종 순위"][phase]
+	if teams and phase == Match.RESULTS:
+		sidebar_title.text = "팀전 결과"
 	sidebar_meta.text = ["%d / %d명" % [players.size(), Rules.CAPACITY],
 		"", "", "", " · ".join(state.get("winners", []))][phase]
 	sidebar_hint.text = ""
@@ -505,13 +580,16 @@ func update_sidebar(state: Dictionary, phase: int, players: Dictionary, local: D
 		if roster[index].visible:
 			var id: int = order[index]
 			var player: Dictionary = players[id]
+			var team: int = player.team
 			var details := ""
 			if phase == Match.RESULTS:
 				details = "%d승   %d킬   %d 피해" % [player.wins, player.total_kills, player.total_damage]
 			elif phase == Match.LOBBY:
 				details = "호스트" if id == 1 else ("훈련 봇" if id < 0 else "참가")
+			if team >= 0:
+				details = "%s  ·  %s" % [Rules.TEAM_NAMES[team], details]
 			roster[index].text = "●  %s    ·    %s" % [player.name, details]
-			roster[index].add_theme_color_override("font_color", Rules.COLORS[player.color])
+			roster[index].add_theme_color_override("font_color", Rules.TEAM_COLORS[team] if team >= 0 else Rules.COLORS[player.color])
 	for slot in range(Rules.SLOTS.size()):
 		shop_rows[slot].visible = shopping
 		shop_prices[slot].visible = shopping
@@ -559,4 +637,10 @@ func update_skills(local: Dictionary, phase: int) -> void:
 		skill_status[slot].text = "미구매" if level == 0 else ("%.1f초" % cd if cd > 0.0 else "Lv.%d  ·  준비" % level)
 		if recast > 0.0:
 			skill_status[slot].text = "재입력 %.1f초" % recast
+		if phase == Match.FIGHT and level > 0:
+			var blocked := Match.cast_block(local, slot)
+			if not blocked.is_empty():
+				skill_status[slot].text = blocked
+			elif slot == Rules.MOVE and local.get("cloak", 0.0) > 0.0:
+				skill_status[slot].text = "은신 %.1f초" % local.cloak
 		skill_fill[slot].size.x = 168.0 * clampf(1.0 - cd / Rules.cooldown(slot, choice, maxi(level, 1)), 0.0, 1.0) if level else 0.0

@@ -6,7 +6,7 @@ const Arena = preload("res://arena.gd")
 const Hud = preload("res://hud.gd")
 const Sounds = preload("res://sounds.gd")
 const Motion = preload("res://motion.gd")
-const VERSION := 11
+const VERSION := 15
 const CAST_KEYS := [KEY_Q, KEY_E, KEY_R, KEY_F, KEY_SPACE]
 const CAST_SOUNDS := [0, 1, 4, 1, 3, 2]
 enum { MENU, CONNECTING, ROOM }
@@ -64,7 +64,7 @@ func parse_port(value: String) -> int:
 	return number
 
 
-func host_game(nickname: String, port_text: String) -> void:
+func host_game(nickname: String, port_text: String, mode := Match.FREE_FOR_ALL) -> void:
 	if screen != MENU:
 		return
 	var number := parse_port(port_text)
@@ -78,11 +78,12 @@ func host_game(nickname: String, port_text: String) -> void:
 	multiplayer.multiplayer_peer = peer
 	addresses = local_addresses(number)
 	hud.set_addresses(addresses)
-	enter_host(nickname)
+	enter_host(nickname, mode)
 
 
-func enter_host(nickname: String) -> void:
+func enter_host(nickname: String, mode: int) -> void:
 	sim = Match.new()
+	sim.mode = Match.TEAM_MATCH if mode == Match.TEAM_MATCH else Match.FREE_FOR_ALL
 	sim.add_player(1, clean_name(nickname))
 	own_id = 1
 	screen = ROOM
@@ -91,12 +92,16 @@ func enter_host(nickname: String) -> void:
 	state = sim.snapshot()
 
 
-func practice(nickname: String) -> void:
+func practice(nickname: String, bot_count := 1, mode := Match.FREE_FOR_ALL) -> void:
 	if screen != MENU:
 		return
 	practice_mode = true
-	enter_host(nickname)
-	sim.add_player(-1, "스파링 봇")
+	enter_host(nickname, mode)
+	var count := clampi(bot_count, 1, Rules.CAPACITY - 1)
+	if sim.mode == Match.TEAM_MATCH:
+		count |= 1
+	for index in range(1, count + 1):
+		sim.add_player(-index, "스파링 봇 %d" % index if count > 1 else "스파링 봇")
 	sim.start_match()
 	state = sim.snapshot()
 
@@ -230,6 +235,23 @@ func primary_action() -> void:
 		broadcast_state(true)
 
 
+func switch_team() -> void:
+	if screen != ROOM or state.get("phase") != Match.LOBBY or state.get("mode") != Match.TEAM_MATCH:
+		return
+	if host:
+		sim.switch_team(own_id)
+		broadcast_state(true)
+	else:
+		request_team_switch.rpc_id(1, state.epoch)
+
+
+@rpc("any_peer", "call_remote", "reliable", 0)
+func request_team_switch(epoch: int) -> void:
+	if host and epoch == sim.epoch and sim.phase == Match.LOBBY and sim.mode == Match.TEAM_MATCH:
+		sim.switch_team(multiplayer.get_remote_sender_id())
+		broadcast_state(true)
+
+
 func buy_slot(slot: int, choice := 0) -> void:
 	if state.get("phase") != Match.SHOP:
 		return
@@ -304,14 +326,16 @@ func broadcast_state(reliable: bool) -> void:
 		return
 	ticks += 1
 	if not reliable:
-		var data := Motion.encode(sim)
+		var has_cloak: bool = sim.players.values().any(func(player: Dictionary): return player.cloak > 0.0)
+		var shared := PackedByteArray() if has_cloak else Motion.encode(sim)
 		for id: int in multiplayer.get_peers():
 			if sim.players.has(id):
+				var data := Motion.encode(sim, id) if has_cloak else shared
 				sync_motion.rpc_id(id, data, ticks, sim.epoch)
 		return
 	for id: int in multiplayer.get_peers():
 		if sim.players.has(id):
-			sync_room.rpc_id(id, state, ticks)
+			sync_room.rpc_id(id, sim.snapshot(id), ticks)
 
 
 func _physics_process(delta: float) -> void:

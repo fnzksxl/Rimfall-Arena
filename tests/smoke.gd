@@ -3,6 +3,7 @@ extends SceneTree
 const Scene = preload("res://main.tscn")
 const Match = preload("res://match.gd")
 const Rules = preload("res://rules.gd")
+const Motion = preload("res://motion.gd")
 
 var failures := 0
 
@@ -109,7 +110,6 @@ func test_projectiles() -> void:
 	game.cast(2, 1, game.players[1].p)
 	check(game.players[1].cooldowns[0] == 4.0 and game.players[2].cooldowns[1] == 6.5, "attack cooldowns")
 	check(is_equal_approx(game.shots[0].v.length(), 384.0) and game.shots[0].damage == 8, "pulse travels slower")
-	check(is_equal_approx(game.shots[0].v.length() * game.shots[0].life, 544.0), "projectile keeps its previous maximum travel distance")
 	game.advance(0.30)
 	check(game.shots.is_empty() and game.players[1].hp == 100.0 and game.players[2].hp == 100.0,
 		"opposing swept projectiles are removed before either can hit")
@@ -134,6 +134,22 @@ func test_projectiles() -> void:
 	game.cast(1, Rules.BASIC, Vector2(120, 0))
 	game.advance(0.70)
 	check(game.players[2].hp == 92.0, "wider pulse hits within its new width")
+	game.shots.clear()
+	game.half_side = 220.0
+	var pulse: Dictionary = Rules.skill(Rules.BASIC, 0).shot
+	game.shoot(1, Rules.BASIC, Vector2.RIGHT, Vector2.ZERO, pulse, 1)
+	game.resolve_projectiles(3.0, {})
+	check(game.shots.size() == 1 and is_equal_approx(game.shots[0].p.x, 1152.0),
+		"shots pass their former range and both the moving and original safe lines")
+	game.resolve_projectiles(0.75, {})
+	check(game.shots.is_empty(), "straight shot disappears at the fixed map boundary")
+	var edge := Rules.MAP_HALF_SIDE
+	var corner := Vector2(edge, -edge)
+	game.shoot(1, Rules.BASIC, Vector2(1, -1).normalized(), corner - Vector2(50, -50), pulse, 1)
+	game.resolve_projectiles(0.1, {})
+	check(game.shots.size() == 1, "diagonal shot survives just inside a corner")
+	game.resolve_projectiles(0.1, {})
+	check(game.shots.is_empty(), "diagonal shot disappears at the map corner")
 
 
 func test_loadouts() -> void:
@@ -190,12 +206,9 @@ func test_loadouts() -> void:
 			pilot.choices[slot] = choice
 			game.cast(1, slot, Vector2(85, 0))
 			check(pilot.cooldowns[slot] > 0.0 and (
-				not game.shots.is_empty() or not game.strikes.is_empty() or not game.effects.is_empty()),
+				not game.shots.is_empty() or not game.strikes.is_empty() or not game.effects.is_empty() or pilot.mirror_mask != 0),
 				"cast %s variant %d" % [Rules.SLOTS[slot].key, choice + 1])
-			if slot == Rules.Q and choice == 2:
-				game.advance(1.0 / 60.0)
-				check(game.shots.size() == 3, "fan rounds do not collide with each other on launch")
-			elif slot == Rules.E and choice == 2:
+			if slot == Rules.E and choice == 2:
 				check(game.strikes.size() == 3 and game.strikes[0].left < game.strikes[2].left,
 					"fissure explosions are staggered")
 			elif slot == Rules.R and choice == 2:
@@ -240,7 +253,9 @@ func test_projectile_tactics() -> void:
 	for frame in range(82):
 		game.advance(1.0 / 60.0)
 		rival.kick = Vector2.ZERO
-	check(rival.hp == 84.0 and game.shots.is_empty(), "disc hits once on each pass and returns with reduced damage")
+	check(rival.hp == 84.0 and game.shots.size() == 1 and game.shots[0].v.x < 0.0,
+		"disc hits once on each pass and continues with reduced damage")
+	game.shots.clear()
 	game.reset_player(pilot, Vector2(-85, 0))
 	game.reset_player(rival, Vector2(85, 0))
 	game.cast(2, Rules.F, pilot.p)
@@ -279,8 +294,9 @@ func test_equipment() -> void:
 	game.sell_gear(2, 0)
 	game.sell_gear(2, 0)
 	game.sell_gear(2, 4)
-	game.buy(2, Rules.GEAR, 5)
-	check(heavy.equipment == [3, 5] and heavy.gold == 167, "selling frees a slot and refunds half the original price once")
+	game.buy(2, Rules.GEAR, 2)
+	game.sell_gear(2, 2)
+	check(heavy.equipment == [3] and heavy.gold == 224, "selling frees a slot and refunds half the original price once")
 	game.advance(Rules.SHOP_TIME)
 	game.advance(3.0)
 	for frame in range(12):
@@ -291,8 +307,7 @@ func test_equipment() -> void:
 	game.hit(3, 2, 8, 255, Vector2.RIGHT)
 	check(is_equal_approx(light.kick.length() / heavy.kick.length(), 1.20 / 0.82), "gear modifies incoming knockback")
 	game.cast(2, Rules.BASIC, Vector2.ZERO)
-	check(is_equal_approx(game.shots[0].life * game.shots[0].v.length(), 544.0 * 0.85 * 1.18)
-		and is_equal_approx(game.shots[0].v.length(), 384.0 * 0.90), "projectile equipment modifiers combine")
+	check(is_equal_approx(game.shots[0].v.length(), 384.0 * 0.85), "heavy frame trades projectile speed for knockback resistance")
 	game.shots.clear()
 	rescue.p = Vector2(Rules.HALF_SIDE + 30.0, 100.0)
 	game.advance(0.2)
@@ -305,6 +320,41 @@ func test_equipment() -> void:
 	game.finish_round(3)
 	game.begin_countdown()
 	check(not rescue.gear_used and rescue.equipment == [1], "equipment stays equipped and protection resets for the new round")
+
+
+func test_combat_gear() -> void:
+	var game := Match.new()
+	game.add_player(1, "Siphon")
+	game.add_player(2, "Shield")
+	game.start_match()
+	game.players[1].gold = 300
+	game.players[2].gold = 300
+	game.buy(1, Rules.GEAR, 5)
+	game.buy(1, Rules.GEAR, 7)
+	game.buy(2, Rules.GEAR, 6)
+	game.buy(2, Rules.GEAR, Rules.SHIELD_GEAR)
+	game.advance(Rules.SHOP_TIME)
+	game.advance(3.0)
+	var siphon: Dictionary = game.players[1]
+	var shield: Dictionary = game.players[2]
+	siphon.hp = 70.0
+	game.hit(1, 2, 22, 200, Vector2.RIGHT)
+	check(shield.shield_used and shield.hp == 88.0 and is_equal_approx(siphon.hp, 72.4), "shield and armor reduce damage before lifesteal")
+	shield.kick = Vector2.ZERO
+	game.hit(1, 2, 22, 200, Vector2.RIGHT)
+	check(shield.hp == 68.0 and is_equal_approx(siphon.hp, 76.4), "the shield absorbs only the first hit")
+	game.hit(2, 1, 22, 200, Vector2.LEFT)
+	check(is_equal_approx(siphon.hp, 54.4), "lifesteal item increases received damage after the attacker's armor penalty")
+	siphon.kick = Vector2.ZERO
+	game.advance(2.9)
+	check(is_equal_approx(siphon.hp, 54.4), "cloak waits three seconds after a hit")
+	game.advance(1.1)
+	check(is_equal_approx(siphon.hp, 55.9), "cloak regenerates while in the safe zone")
+	siphon.p = Vector2(Rules.HALF_SIDE + 50.0, 0)
+	game.advance(1.0)
+	check(is_equal_approx(siphon.hp, 41.9), "cloak does not regenerate outside the safe zone")
+	game.begin_countdown()
+	check(not shield.shield_used, "shield refreshes each round")
 
 
 func test_extended_casts() -> void:
@@ -331,7 +381,7 @@ func test_extended_casts() -> void:
 	pilot.choices[Rules.Q] = 5
 	pilot.cooldowns[Rules.Q] = 0.0
 	game.cast(1, Rules.Q, Vector2.ZERO)
-	game.advance(0.24)
+	game.advance(0.21)
 	check(is_zero_approx(game.shots[0].v.y), "seeker has an arming delay")
 	game.advance(0.05)
 	check(game.shots[0].v.y > 0.0 and game.shots[0].v.angle() < 0.08, "seeker follows a target with a turn limit")
@@ -368,6 +418,221 @@ func test_extended_casts() -> void:
 	game.cast(1, Rules.MOVE, Vector2.ZERO)
 	game.cast(1, Rules.MOVE, Vector2(-180, -100))
 	check(pilot.kick.y < 0.0 and pilot.step_left == 0.0 and not Match.can_cast(pilot, Rules.MOVE), "double step gives one directed recast")
+
+
+func test_tactical_casts() -> void:
+	var game := Match.new()
+	for id in range(1, 5):
+		game.add_player(id, "Pilot %d" % id)
+	game.start_match()
+	game.players[1].gold = 900
+	game.players[2].gold = 900
+	game.buy(1, Rules.Q, 2)
+	game.buy(1, Rules.E, 4)
+	game.buy(1, Rules.R, 4)
+	game.buy(1, Rules.F, 6)
+	game.buy(1, Rules.MOVE, 4)
+	game.buy(2, Rules.Q, 6)
+	game.buy(2, Rules.E, 5)
+	game.buy(2, Rules.R, 5)
+	game.advance(Rules.SHOP_TIME)
+	game.advance(3.0)
+	var pilot: Dictionary = game.players[1]
+	var rival: Dictionary = game.players[2]
+	game.reset_player(pilot, Vector2(-200, 0))
+	game.reset_player(rival, Vector2(-15, 0))
+	game.reset_player(game.players[3], Vector2(115, 100))
+	game.reset_player(game.players[4], Vector2(225, 170))
+	game.cast(1, Rules.Q, Vector2.ZERO)
+	game.advance(0.50)
+	game.advance(0.70)
+	game.advance(0.60)
+	check(rival.hp == 90.0 and game.players[3].hp == 93.0 and game.players[4].hp == 95.0 and game.shots.is_empty(),
+		"ricochet hits three distinct opponents with decreasing damage")
+
+	game.reset_player(pilot, Vector2(-160, 0))
+	game.reset_player(rival, Vector2(80, 0))
+	game.reset_player(game.players[3], Vector2(400, 400))
+	game.reset_player(game.players[4], Vector2(520, 510))
+	game.cast(1, Rules.R, rival.p)
+	game.advance(0.80)
+	check(pilot.p == Vector2(80, 0) and rival.p == Vector2(-160, 0) and pilot.kick == Vector2.ZERO and rival.kick == Vector2.ZERO,
+		"swap exchanges positions without carrying momentum")
+	game.cast(2, Rules.Q, pilot.p)
+	game.advance(0.80)
+	check(pilot.root > 0.0 and pilot.kick != Vector2.ZERO and not Match.can_cast(pilot, Rules.MOVE)
+		and Match.can_cast(pilot, Rules.BASIC), "root blocks movement skill but allows knockback and basic attacks")
+	game.steer(1, Vector2.UP, Vector2.ZERO)
+	game.advance(0.10)
+	check(pilot.walk == Vector2.ZERO, "root suppresses walking input")
+
+	game.reset_player(pilot, Vector2(-130, 0))
+	game.reset_player(rival, Vector2(100, 0))
+	game.cast(2, Rules.R, pilot.p)
+	game.advance(0.75)
+	check(pilot.jam > 0.0 and not Match.can_cast(pilot, Rules.F) and Match.can_cast(pilot, Rules.BASIC),
+		"jam blocks skill slots and keeps the basic attack available")
+
+	game.reset_player(pilot, Vector2(-145, 0))
+	game.reset_player(rival, Vector2(95, 0))
+	game.cast(1, Rules.E, rival.p)
+	game.advance(0.75)
+	check(pilot.link_target == 2 and rival.hp == 96.0, "link attaches on projectile hit in range")
+	rival.kick = Vector2.ZERO
+	game.advance(0.66)
+	check(rival.hp == 93.0 and rival.kick == Vector2.ZERO, "tether ticks without additional knockback")
+	game.advance(1.30)
+	check(rival.hp == 87.0 and pilot.link_target == 0, "tether deals three ticks and ends")
+	pilot.cooldowns[Rules.E] = 0.0
+	game.cast(1, Rules.E, rival.p)
+	game.advance(0.75)
+	rival.p = Vector2(450, 0)
+	rival.kick = Vector2.ZERO
+	game.advance(0.80)
+	check(rival.hp == 83.0 and pilot.link_target == 0, "tether snaps before dealing a tick when the target leaves range")
+
+	game.reset_player(pilot, Vector2(-150, 0))
+	game.cast(1, Rules.F, Vector2.ZERO)
+	var decoy: Vector2 = pilot.p + Match.mirror_offset(pilot, 0)
+	game.reset_player(rival, decoy - Vector2(130, 0))
+	game.cast(2, Rules.BASIC, decoy)
+	game.advance(0.40)
+	check(pilot.mirror_mask == 2 and pilot.hp == 100.0 and game.shots.is_empty(), "a mirror takes one projectile for the caster")
+	game.cast(1, Rules.MOVE, Vector2.ZERO)
+	game.steer(1, Vector2.UP, Vector2.ZERO)
+	game.advance(0.13)
+	check(pilot.cloak > 0.0 and pilot.mirror_mask == 0 and is_equal_approx(pilot.walk.length(), Rules.WALK_SPEED * 1.22),
+		"cloak hides existing images and increases walking speed")
+	var hidden := game.snapshot(2).duplicate(true)
+	Motion.apply(Motion.encode(game, 2), hidden)
+	check(hidden.players[1].p == Vector2.ZERO and game.snapshot(1).players[1].p == pilot.p,
+		"opponents do not receive the concealed position")
+	game.cast(1, Rules.BASIC, Vector2(0, 400))
+	check(pilot.cloak == 0.0, "a successful attack reveals the cloaked caster")
+	pilot.cooldowns[Rules.MOVE] = 0.0
+	game.cast(1, Rules.MOVE, Vector2.ZERO)
+	game.hit(2, 1, 4, 100.0, Vector2.RIGHT)
+	check(pilot.cloak == 0.0, "a direct hit reveals the cloaked target")
+	game.shots.clear()
+
+	game.reset_player(rival, Vector2(80, 0))
+	game.cast(2, Rules.E, Vector2(200, 0))
+	game.advance(0.57)
+	check(game.strikes.size() == 1 and game.shots.is_empty(), "repeater telegraphs before firing")
+	game.advance(0.02)
+	game.steer(2, Vector2.ZERO, Vector2(80, 300))
+	game.advance(0.44)
+	game.advance(0.43)
+	check(game.strikes.is_empty() and game.shots.size() == 3 and game.shots.all(func(shot: Dictionary): return shot.v.x > 0.0 and shot.v.y == 0.0),
+		"repeater fires three times from its placed position in its original direction")
+
+
+func test_cloak_collision() -> void:
+	var game := Match.new()
+	game.mode = Match.TEAM_MATCH
+	for id in range(1, 5):
+		game.add_player(id, "Pilot %d" % id)
+	game.start_match()
+	game.buy(1, Rules.MOVE, 4)
+	game.advance(Rules.SHOP_TIME)
+	game.advance(3.0)
+	var pilot: Dictionary = game.players[1]
+	var target: Dictionary = game.players[2]
+	var ally: Dictionary = game.players[3]
+	var second_target: Dictionary = game.players[4]
+	game.reset_player(pilot, Vector2.ZERO)
+	game.reset_player(target, Vector2(110, 0))
+	game.reset_player(ally, Vector2(56, 0))
+	game.reset_player(second_target, Vector2(117, 11))
+	game.cast(1, Rules.MOVE, Vector2.RIGHT * 300.0)
+	game.steer(1, Vector2.RIGHT, Vector2.RIGHT * 300.0)
+	game.advance(0.25)
+	check(pilot.cloak > 0.0 and pilot.p.distance_to(ally.p) < 2.0 * Rules.BODY_RADIUS and ally.hp == 100.0,
+		"cloak continues through allies with no friendly fire")
+	for step in range(3):
+		game.steer(1, Vector2.RIGHT, Vector2.RIGHT * 300.0)
+		game.advance(0.25)
+	check(pilot.cloak == 0.0 and target.hp == 94.0 and target.kick.x > 0.0 and second_target.hp == 100.0,
+		"walking into the first enemy deals damage and knockback and reveals the caster once")
+	game.reset_player(pilot, Vector2.ZERO)
+	game.reset_player(target, Vector2(60, 0))
+	game.cast(1, Rules.MOVE, Vector2.RIGHT * 300.0)
+	pilot.cloak = 0.05
+	game.steer(1, Vector2.RIGHT, Vector2.RIGHT * 300.0)
+	game.advance(0.25)
+	check(pilot.cloak == 0.0 and target.hp == 100.0, "an enemy reached after cloak expires is not hit")
+
+
+func test_practice_bots() -> void:
+	var room := new_room_tree("Practice")
+	room.practice("연습", 5)
+	var game: RefCounted = room.sim
+	check(game.players.size() == 6 and game.phase == Match.SHOP, "five sparring bots fill a solo room")
+	for id in range(1, 6):
+		check(game.players[-id].ready and game.players[-id].levels[Rules.Q] == 1, "every bot shops and readies")
+	game.toggle_ready(1)
+	game.advance(0.01)
+	game.advance(3.0)
+	game.reset_player(game.players[-1], Vector2(-220, 0))
+	game.reset_player(game.players[-2], Vector2(-60, 0))
+	game.reset_player(game.players[1], Vector2(400, 350))
+	game.players[1].alive = false
+	game.elapsed = 1.0
+	game.advance(0.10)
+	check(game.phase == Match.FIGHT and game.players[-1].aim.x > 0.90 and game.players[-2].aim.x < -0.90,
+		"bots keep targeting each other after the human is eliminated")
+	check(game.shots.any(func(shot: Dictionary): return shot.owner == -1) and
+		game.shots.any(func(shot: Dictionary): return shot.owner == -2), "multiple bots cast independently")
+	room.leave_game()
+	room.practice("연습", 5, Match.TEAM_MATCH)
+	check(Match.team_counts(room.sim.players) == [3, 3], "team practice balances five bots and one human")
+	room.leave_game()
+	room.get_parent().queue_free()
+
+
+func test_team_rules() -> void:
+	var game := Match.new()
+	game.mode = Match.TEAM_MATCH
+	for id in range(1, 5):
+		game.add_player(id, "Pilot %d" % id)
+	check(Match.team_counts(game.players) == [2, 2] and game.players[1].team == game.players[3].team, "team assignment is balanced")
+	game.switch_team(4)
+	game.start_match()
+	check(game.phase == Match.LOBBY and Match.team_counts(game.players) == [3, 1], "unbalanced online teams cannot start")
+	game.switch_team(4)
+	game.start_match()
+	game.advance(Rules.SHOP_TIME)
+	game.advance(3.0)
+	check(game.players[1].p.x < 0.0 and game.players[3].p.x < 0.0 and game.players[2].p.x > 0.0, "teams spawn on opposite sides")
+	game.switch_team(3)
+	check(game.players[3].team == 0, "team switching is limited to the lobby")
+	game.reset_player(game.players[1], Vector2(-120, 0))
+	game.reset_player(game.players[3], Vector2.ZERO)
+	game.reset_player(game.players[2], Vector2(110, 0))
+	game.reset_player(game.players[4], Vector2(0, 200))
+	game.cast(1, Rules.BASIC, game.players[2].p)
+	game.advance(0.60)
+	check(game.players[3].hp == 100.0 and game.players[2].hp == 92.0, "shots pass through teammates and damage opponents")
+	game.add_strike(1, Rules.E, Vector2.ZERO, 55.0, 0.01, 15, 300.0, 1)
+	game.advance(0.02)
+	check(game.players[3].hp == 100.0 and game.players[3].kick == Vector2.ZERO, "area hits also ignore teammates")
+	game.players[3].p = Vector2(0, 80)
+	game.players[3].cloak = 1.0
+	check(game.snapshot(1).players[3].p == game.players[3].p and game.snapshot(2).players[3].p == Vector2.ZERO,
+		"cloak shares position with teammates only")
+	game.players[2].alive = false
+	game.players[4].alive = false
+	game.advance(0.02)
+	check(game.phase == Match.SHOP and game.round_winner == "블루 팀" and game.team_wins == [1, 0] and game.players[3].wins == 1,
+		"multiple allied survivors win a single round for their whole team")
+	game.round_no = Rules.ROUNDS
+	game.finish_round(1)
+	check(game.phase == Match.RESULTS and game.winners == ["블루 팀"] and game.team_wins == [2, 0], "team rounds determine the champion")
+	game.return_to_lobby()
+	game.start_match()
+	game.remove_player(2)
+	game.remove_player(4)
+	check(game.phase == Match.RESULTS and game.team_forfeit and game.winners == ["블루 팀"], "departing team forfeits the match")
 
 
 func test_network() -> void:
@@ -460,6 +725,7 @@ func test_network() -> void:
 				"client receives performance gold")
 			client.buy_slot(Rules.E)
 			await wait_for(func(): return client.state.players[client_id].levels[Rules.E] == 1, "round gold can buy a new skill")
+			server.buy_slot(Rules.MOVE, 4)
 		elif round_no == 2:
 			var gold_before: int = client.state.players[client_id].gold
 			client.buy_slot(Rules.GEAR, 0)
@@ -467,6 +733,8 @@ func test_network() -> void:
 			client.sell_gear(0)
 			await wait_for(func(): return client.state.players[client_id].equipment.is_empty() and client.state.players[client_id].gold == gold_before - 45,
 				"client sale clears equipment and replicates half the purchase price")
+			server.buy_slot(Rules.GEAR, Rules.SHIELD_GEAR)
+			await wait_for(func(): return Rules.SHIELD_GEAR in client.state.players[1].equipment, "new gear purchase replicates")
 		client.primary_action()
 		server.primary_action()
 		if not await wait_for(func(): return client.state.phase == Match.FIGHT, "next round starts"):
@@ -480,6 +748,29 @@ func test_network() -> void:
 			check(client.state.players[client_id].cooldowns[Rules.E] > 8.5, "long strike cooldown is encoded without overflow")
 			await wait_for(func(): return client.state.players[1].impact >= 24.0 and client.state.players[1].hp == 82.0,
 				"delayed strike lands and syncs")
+			server.sim.cast(1, Rules.MOVE, Vector2.ZERO)
+			await wait_for(func(): return client.state.players[1].cloak > 0.0 and client.state.players[1].p == Vector2.ZERO,
+				"motion updates conceal a remote opponent's position")
+			server.broadcast_state(true)
+			var expected_stamp: int = server.ticks
+			await wait_for(func(): return client.reliable_stamp >= expected_stamp and (
+				client.state.players[1].cloak > 0.0 and client.state.players[1].p == Vector2.ZERO), "reliable state keeps the opponent concealed")
+			server.sim.cast(1, Rules.BASIC, Vector2(0, 400))
+			await wait_for(func(): return client.state.players[1].cloak == 0.0 and client.state.players[1].p != Vector2.ZERO,
+				"revealed opponent position resumes replicating")
+		elif round_no == 2:
+			server.sim.reset_player(server.sim.players[1], Vector2(-400, 0))
+			server.sim.reset_player(server.sim.players[client_id], Vector2(400, 0))
+			client.request_cast.rpc_id(1, client.state.epoch, Rules.BASIC, Vector2(-400, 0))
+			await wait_for(func(): return client.state.players[1].shield_used and client.state.players[1].hp == 95.0,
+				"shot lands beyond its old range and shield mitigation replicates")
+			server.sim.reset_player(server.sim.players[1], Vector2(-100, 0))
+			server.sim.reset_player(server.sim.players[client_id], Vector2(-66, 0))
+			server.sim.cast(1, Rules.MOVE, Vector2.ZERO)
+			await wait_for(func(): return client.state.players[1].cloak > 0.0, "cloak activates before contact")
+			server.sim.players[client_id].kick = Vector2(-200, 0)
+			await wait_for(func(): return (client.state.players[1].cloak == 0.0 and client.state.players[1].p != Vector2.ZERO
+				and client.state.players[client_id].hp == 94.0), "cloak contact damage and reveal replicate together")
 	check(client.state.winners == ["친구"] and client.state.players[client_id].wins == 5, "match champion")
 	server.primary_action()
 	await wait_for(func(): return client.state.phase == Match.LOBBY, "back to lobby for rematch")
@@ -493,14 +784,55 @@ func test_network() -> void:
 		"host shutdown returns the client to the menu")
 
 
+func test_network_teams() -> void:
+	var server := new_room_tree("TeamServer")
+	var client := new_room_tree("TeamClient")
+	var port_number := "27439"
+	server.host_game("블루", port_number, Match.TEAM_MATCH)
+	client.join_game("오렌지", "127.0.0.1", port_number)
+	if not await wait_for(func(): return client.state.get("mode") == Match.TEAM_MATCH and client.state.players.size() == 2,
+		"online room mode and two teams replicate"):
+		return
+	var client_id: int = client.own_id
+	client.switch_team()
+	await wait_for(func(): return client.state.players[client_id].team == client.state.players[1].team,
+		"online client team switch replicates")
+	server.primary_action()
+	check(server.sim.phase == Match.LOBBY, "host cannot start with an empty opposing team")
+	client.switch_team()
+	await wait_for(func(): return client.state.players[client_id].team != client.state.players[1].team,
+		"client restores the opposing team")
+	server.primary_action()
+	if not await wait_for(func(): return client.state.phase == Match.SHOP, "team match starts"):
+		return
+	server.primary_action()
+	client.primary_action()
+	if not await wait_for(func(): return client.state.phase == Match.FIGHT, "team match enters combat"):
+		return
+	server.sim.players[client_id].p = Vector2(1100, 0)
+	server.sim.players[client_id].hp = 0.1
+	await wait_for(func(): return client.state.phase == Match.SHOP and client.state.team_wins == [1, 0] and client.state.round_winner == "블루 팀",
+		"team victory and score replicate to the client")
+	client.leave_game()
+	await wait_for(func(): return server.state.phase == Match.RESULTS and server.state.winners == ["블루 팀"],
+		"online team forfeits when its last member disconnects")
+	server.leave_game()
+
+
 func run() -> void:
 	test_rules()
 	test_projectiles()
 	test_loadouts()
 	test_projectile_tactics()
 	test_equipment()
+	test_combat_gear()
 	test_extended_casts()
+	test_tactical_casts()
+	test_cloak_collision()
+	test_practice_bots()
+	test_team_rules()
 	await test_network()
+	await test_network_teams()
 	if failures == 0:
 		print("RIMFALL RULES + ENET MATCH PASSED")
 	quit(1 if failures else 0)

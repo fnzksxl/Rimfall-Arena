@@ -43,9 +43,12 @@ func _process(delta: float) -> void:
 	var blend := 1.0 - exp(-delta * 29.0)
 	var players: Dictionary = state.get("players", {})
 	for id: int in players:
+		if concealed(id, players[id]):
+			fighter_positions.erase(id)
+			continue
 		var pos: Vector2 = players[id].p
 		var shown: Vector2 = fighter_positions.get(id, pos)
-		fighter_positions[id] = shown.lerp(pos, blend)
+		fighter_positions[id] = pos if shown.distance_squared_to(pos) > 240.0 * 240.0 else shown.lerp(pos, blend)
 	update_camera(phase, players, delta)
 	var current_shots := {}
 	for shot: Dictionary in state.get("shots", []):
@@ -53,6 +56,11 @@ func _process(delta: float) -> void:
 		current_shots[shot.id] = shown.lerp(shot.p, blend)
 	shot_positions = current_shots
 	queue_redraw()
+
+
+func concealed(id: int, player: Dictionary) -> bool:
+	return id != own_id and player.get("cloak", 0.0) > 0.0 and \
+		not Match.same_team(state.players.get(own_id, {}), player)
 
 
 func update_camera(phase: int, players: Dictionary, delta: float) -> void:
@@ -68,12 +76,15 @@ func update_camera(phase: int, players: Dictionary, delta: float) -> void:
 			followed_id = own_id
 			camera_focus = fighter_positions[own_id]
 		else:
-			if not players.get(followed_id, {}).get("alive", false):
+			if not players.get(followed_id, {}).get("alive", false) or concealed(followed_id, players[followed_id]):
 				followed_id = 0
 				for id: int in players:
-					if players[id].alive:
-						followed_id = id
-						break
+					if players[id].alive and not concealed(id, players[id]):
+						if followed_id == 0:
+							followed_id = id
+						if Match.same_team(players.get(own_id, {}), players[id]):
+							followed_id = id
+							break
 			if followed_id != 0:
 				camera_focus = camera_focus.lerp(fighter_positions[followed_id], 1.0 - exp(-delta * 9.0))
 	else:
@@ -94,9 +105,11 @@ func draw_backdrop() -> void:
 	var scatter := RandomNumberGenerator.new()
 	scatter.seed = 39
 	for index in range(240):
-		var point := Vector2(scatter.randf_range(-1440, 1440), scatter.randf_range(-1440, 1440))
+		var extent := Rules.MAP_HALF_SIDE
+		var point := Vector2(scatter.randf_range(-extent, extent), scatter.randf_range(-extent, extent))
 		if Rules.square_extent(point) > half + 30.0:
 			backdrop.draw_circle(point, 1.2 + (index % 3) * 0.5, Color("#31505f"), true, -1.0, true)
+	backdrop.draw_rect(square(Rules.MAP_HALF_SIDE), Color("#526c78"), false, 3.0, true)
 	backdrop.draw_rect(square(half + 28.0).grow_individual(0, 0, 0, 18), Color("#040b12"))
 	backdrop.draw_rect(square(half + 28.0), Color("#203642"))
 	backdrop.draw_rect(square(half + 22.0), Color("#122530"))
@@ -166,6 +179,11 @@ func _draw() -> void:
 			for spoke in range(4):
 				var ray := Vector2.from_angle(strike.angle + spoke * PI * 0.5)
 				draw_dashed_line(strike.p + ray * 20.0, strike.p + ray * 54.0, Color(tint, 0.7), 2.0, 5.0)
+		if strike.has("repeats"):
+			var aim := Vector2.from_angle(strike.angle)
+			draw_line(strike.p, strike.p + aim * 36.0, tint, 4.0, true)
+			for remaining in range(strike.repeats):
+				draw_circle(strike.p - aim * 9.0 + aim.orthogonal() * (remaining - 1) * 7.0, 2.0, tint)
 		if strike.pull:
 			for index in range(4):
 				var inward := Vector2.from_angle(index * TAU / 4.0 + progress)
@@ -173,15 +191,25 @@ func _draw() -> void:
 	for shot: Dictionary in state.shots:
 		draw_shot(shot)
 	for id: int in state.players:
+		var source: Dictionary = state.players[id]
+		var target_id: int = source.link_target
+		var target: Dictionary = state.players.get(target_id, {})
+		if source.alive and target.get("alive", false) and not concealed(id, source) and not concealed(target_id, target):
+			var start: Vector2 = fighter_positions.get(id, source.p)
+			var end: Vector2 = fighter_positions.get(target_id, target.p)
+			var color: Color = Rules.SLOTS[Rules.E].color
+			draw_line(start, end, Color(color, 0.28), 6.0, true)
+			draw_dashed_line(start, end, color, 2.0, 9.0)
+	for id: int in state.players:
 		var player: Dictionary = state.players[id]
-		if not player.alive:
+		if not player.alive or concealed(id, player):
 			continue
 		var point: Vector2 = fighter_positions.get(id, player.p)
 		var own := id == own_id
 		var facing: Vector2 = player.aim
 		if own and phase == Match.FIGHT and not world_target().is_equal_approx(point):
 			facing = point.direction_to(world_target())
-		var tint: Color = Rules.COLORS[player.color]
+		var tint: Color = Rules.TEAM_COLORS[player.team] if player.team >= 0 else Rules.COLORS[player.color]
 		if player.anchor_left > 0.0:
 			var anchor_color: Color = Rules.SLOTS[Rules.F].color
 			draw_circle(player.anchor_pos, 18.0, Color(anchor_color, 0.17), true, -1.0, true)
@@ -209,6 +237,22 @@ func _draw() -> void:
 				draw_arc(point, 27.0, angle, angle + 0.64, 10, reflect_color, 2.5, true)
 		if player.gear_time > 0.0:
 			draw_circle(point, 32.0, Rules.SLOTS[Rules.GEAR].color, false, 2.1, true)
+		if player.root > 0.0:
+			draw_rect(Rect2(point - Vector2(23, 23), Vector2(46, 46)), Rules.SLOTS[Rules.Q].color, false, 1.8, true)
+		if player.jam > 0.0:
+			draw_arc(point, 32.0, clock * 3.0, clock * 3.0 + 4.6, 26, Rules.SLOTS[Rules.R].color, 2.2, true)
+		if player.cloak > 0.0:
+			tint = tint.darkened(0.38)
+		if player.mirror_mask != 0:
+			for index in range(2):
+				if not (player.mirror_mask & (1 << index)):
+					continue
+				var offset := Match.mirror_offset(player, index)
+				if Rules.square_extent(player.p + offset) > Rules.MAP_HALF_SIDE:
+					continue
+				var decoy_tint := tint.darkened(0.35) if own else tint
+				draw_fighter(point + offset, facing, decoy_tint, false, player.guard, player.flash)
+				draw_tag(point + offset, player, decoy_tint)
 		draw_fighter(point, facing, tint, own, player.guard, player.flash)
 		draw_tag(point, player, tint)
 	for fx: Dictionary in state.effects:
@@ -235,9 +279,10 @@ func offscreen_markers() -> Array[Dictionary]:
 		return markers
 	var positions: Array[Vector2] = []
 	var visible_area := COMBAT_VIEW.grow_individual(28, 8, 28, 8).grow(Rules.BODY_RADIUS * scale.x)
+	var local: Dictionary = state.players.get(own_id, {})
 	for id: int in state.players:
 		var player: Dictionary = state.players[id]
-		if id == own_id or id == followed_id or not player.alive:
+		if id == own_id or id == followed_id or not player.alive or concealed(id, player) or Match.same_team(local, player):
 			continue
 		var projected := to_global(fighter_positions.get(id, player.p))
 		if visible_area.has_point(projected):
@@ -249,7 +294,8 @@ func offscreen_markers() -> Array[Dictionary]:
 		while positions.any(func(other: Vector2): return other.distance_squared_to(point) < 324.0):
 			point -= direction * 19.0
 		positions.append(point)
-		markers.append({"point": point, "direction": direction, "color": Rules.COLORS[player.color]})
+		var tint: Color = Rules.TEAM_COLORS[player.team] if player.team >= 0 else Rules.COLORS[player.color]
+		markers.append({"point": point, "direction": direction, "color": tint})
 	return markers
 
 
@@ -311,6 +357,8 @@ func draw_fighter(point: Vector2, facing: Vector2, tint: Color, own: bool, guard
 
 func draw_tag(point: Vector2, player: Dictionary, tint: Color) -> void:
 	var label := "%s   %d%%" % [player.name, roundi(player.impact)]
+	if player.team >= 0:
+		label = ("%s " % ["●", "◆"][player.team]) + label
 	var font := ThemeDB.fallback_font
 	var width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
 	var origin := point + Vector2(-width * 0.5, -29)
