@@ -25,6 +25,7 @@ var round_winner := ""
 var feed: Array[String] = []
 var feed_revision := 0
 var serial := 0
+var audio_serial := 0
 
 
 static func team_counts(roster: Dictionary) -> Array[int]:
@@ -399,7 +400,7 @@ func hit(owner: int, victim: int, damage: int, force: float, direction: Vector2,
 	damage = maxi(1, roundi((damage + flat) * Rules.equipment_factor(player, "incoming") * protection))
 	if shield:
 		player.shield_used = true
-		effect(player.p, Rules.SLOTS[Rules.GEAR].color, 47.0, 0.33)
+		effect(player.p, Rules.SLOTS[Rules.GEAR].color, 47.0, 0.33, 0, Rules.Cue.DEFLECT)
 	var health_lost := minf(damage, player.hp)
 	player.hp = maxf(0.0, player.hp - damage)
 	player.impact = minf(Rules.MAX_IMPACT, player.impact + damage * 1.35 * Rules.equipment_factor(player, "impact"))
@@ -422,7 +423,7 @@ func hit(owner: int, victim: int, damage: int, force: float, direction: Vector2,
 		attacker.damage += ceili(health_lost)
 		if attacker.alive:
 			attacker.hp = minf(100.0, attacker.hp + health_lost * Rules.equipment_amount(attacker, "lifesteal"))
-	effect(player.p, Rules.COLORS[player.color], 36.0, 0.24, ceili(health_lost))
+	effect(player.p, Rules.COLORS[player.color], 36.0, 0.24, ceili(health_lost), Rules.Cue.HIT)
 	if player.hp <= 0.0:
 		eliminate(victim, "격파")
 
@@ -437,7 +438,7 @@ func eliminate(id: int, cause: String) -> void:
 		push_feed("%s  →  %s %s" % [players[attacker].name, player.name, cause])
 	else:
 		push_feed("%s %s" % [player.name, cause])
-	effect(player.p, Color("#ffa574"), 55.0, 0.50)
+	effect(player.p, Color("#ffa574"), 55.0, 0.50, 0, Rules.Cue.KNOCKOUT)
 
 
 func push_feed(message: String) -> void:
@@ -447,11 +448,13 @@ func push_feed(message: String) -> void:
 		feed.pop_back()
 
 
-func effect(pos: Vector2, tint: Color, size: float, duration: float, damage := 0) -> void:
+func effect(pos: Vector2, tint: Color, size: float, duration: float, damage := 0, cue := -1) -> void:
 	if effects.size() >= 16:
 		effects.pop_front()
+	if cue >= 0:
+		audio_serial += 1
 	effects.append({"p": pos, "color": tint, "size": size, "left": duration,
-		"duration": duration, "damage": damage})
+		"duration": duration, "damage": damage, "cue": cue, "audio_id": audio_serial})
 
 
 func advance(delta: float) -> void:
@@ -631,7 +634,7 @@ func resolve_projectiles(delta: float, previous_positions: Dictionary) -> void:
 			var candidate := shots[other]
 			var contact_at: Vector2 = shot.p + shot.v * delta * contact.at
 			var other_at: Vector2 = candidate.p + candidate.v * delta * contact.at
-			effect(contact_at.lerp(other_at, 0.5), Color("#e8faf8"), 29.0, 0.24)
+			effect(contact_at.lerp(other_at, 0.5), Color("#e8faf8"), 29.0, 0.24, 0, Rules.Cue.CLASH)
 			destroyed[index] = contact.at
 			destroyed[other] = contact.at
 		elif not destroyed.has(index) and players[contact.victim].alive:
@@ -640,7 +643,7 @@ func resolve_projectiles(delta: float, previous_positions: Dictionary) -> void:
 				var mask: int = 1 << contact.mirror
 				if target.mirror_mask & mask:
 					target.mirror_mask &= ~mask
-					effect(target.p + mirror_offset(target, contact.mirror), Rules.SLOTS[Rules.F].color, 26.0, 0.22)
+					effect(target.p + mirror_offset(target, contact.mirror), Rules.SLOTS[Rules.F].color, 26.0, 0.22, 0, Rules.Cue.DEFLECT)
 					if not shot.pierce:
 						destroyed[index] = contact.at
 				continue
@@ -767,7 +770,7 @@ func steer_projectile(shot: Dictionary, delta: float) -> void:
 func reflect_shot(shot: Dictionary, owner: int, time: float) -> Dictionary:
 	serial += 1
 	var location: Vector2 = shot.p + shot.v * time
-	effect(location, Rules.SLOTS[Rules.F].color, 39.0, 0.28)
+	effect(location, Rules.SLOTS[Rules.F].color, 39.0, 0.28, 0, Rules.Cue.DEFLECT)
 	var reflected := shot.duplicate()
 	reflected.merge({"id": serial, "owner": owner, "p": location, "v": -shot.v,
 		"age": 0.0,
@@ -786,7 +789,7 @@ func resolve_strikes(delta: float) -> void:
 			if players.get(strike.owner, {}).get("alive", false):
 				var aim := Vector2.from_angle(strike.angle)
 				shoot(strike.owner, strike.slot, aim, strike.p + aim * 16.0, strike.skill.shot, strike.level)
-				effect(strike.p, Rules.SLOTS[strike.slot].color, 28.0, 0.20)
+				effect(strike.p, Rules.SLOTS[strike.slot].color, 28.0, 0.20, 0, Rules.Cue.FIRE)
 				strike.repeats -= 1
 				if strike.repeats > 0:
 					strike.duration = Rules.REPEATER_INTERVAL
@@ -798,7 +801,7 @@ func resolve_strikes(delta: float) -> void:
 			for spoke in range(4):
 				var aim := Vector2.from_angle(strike.angle + spoke * PI * 0.5)
 				shoot(strike.owner, strike.slot, aim, strike.p + aim * 13.0, strike.skill.shot, strike.level)
-			effect(strike.p, Rules.SLOTS[strike.slot].color, 43.0, 0.30)
+			effect(strike.p, Rules.SLOTS[strike.slot].color, 43.0, 0.30, 0, Rules.Cue.STRIKE)
 			strikes.remove_at(index)
 			continue
 		if strike.pull:
@@ -819,7 +822,7 @@ func resolve_strikes(delta: float) -> void:
 				if strike.pull:
 					direction = -offset.normalized()
 				hit(strike.owner, id, strike.damage, strike.force, direction)
-		effect(strike.p, Rules.SLOTS[strike.slot].color, strike.size, 0.42)
+		effect(strike.p, Rules.SLOTS[strike.slot].color, strike.size, 0.42, 0, Rules.Cue.STRIKE)
 		strikes.remove_at(index)
 
 

@@ -6,9 +6,9 @@ const Arena = preload("res://arena.gd")
 const Hud = preload("res://hud.gd")
 const Sounds = preload("res://sounds.gd")
 const Motion = preload("res://motion.gd")
-const VERSION := 15
+const VERSION := 16
 const CAST_KEYS := [KEY_Q, KEY_E, KEY_R, KEY_F, KEY_SPACE]
-const CAST_SOUNDS := [0, 1, 4, 1, 3, 2]
+const CAST_SOUNDS := [Rules.Cue.FIRE, Rules.Cue.POWER, Rules.Cue.MARK, Rules.Cue.POWER, Rules.Cue.GUARD, Rules.Cue.DASH]
 enum { MENU, CONNECTING, ROOM }
 
 var sim := Match.new()
@@ -28,7 +28,6 @@ var hud := Hud.new()
 var sound := Sounds.new()
 var was_firing := false
 var muted := false
-var last_sound_impact := 0.0
 var last_sound_phase := -1
 var last_cooldowns: Array = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
@@ -194,7 +193,7 @@ func leave_game(message := "") -> void:
 		multiplayer.multiplayer_peer = null
 	status = message
 	last_sound_phase = -1
-	last_sound_impact = 0.0
+	sound.last_effect = 0
 	last_cooldowns.fill(0.0)
 
 
@@ -216,6 +215,7 @@ func copy_address(index: int) -> void:
 
 func toggle_audio() -> void:
 	muted = not muted
+	sound.set_mix(state.get("phase") == Match.FIGHT, muted)
 
 
 func primary_action() -> void:
@@ -412,18 +412,19 @@ func _process(_delta: float) -> void:
 	var phase: int = state.get("phase", Match.LOBBY)
 	var player: Dictionary = state.get("players", {}).get(own_id, {})
 	if phase != last_sound_phase:
-		if phase in [Match.FIGHT, Match.RESULTS] and not muted:
-			sound.play_cue(phase + 3)
-		last_sound_impact = player.get("impact", 0.0)
+		sound.set_mix(phase == Match.FIGHT, muted)
+		if phase == Match.FIGHT:
+			sound.play_cue(Rules.Cue.START)
+		elif phase == Match.RESULTS:
+			sound.play_cue(Rules.Cue.RESULT)
 		last_sound_phase = phase
 		last_cooldowns.fill(0.0)
+	var listener: Vector2 = arena.camera_focus if phase == Match.FIGHT else player.get("p", Vector2.ZERO)
+	sound.play_effects(state.get("effects", []), listener)
 	if phase == Match.FIGHT and not player.is_empty():
-		if player.impact > last_sound_impact and not muted:
-			sound.play_cue(5)
-		last_sound_impact = player.impact
 		for slot in range(Rules.ACTIVE_SLOTS):
 			var cd: float = player.cooldowns[slot]
-			if cd > last_cooldowns[slot] + 0.18 and not muted:
+			if cd > last_cooldowns[slot] + 0.18:
 				sound.play_cue(CAST_SOUNDS[slot])
 			last_cooldowns[slot] = cd
 

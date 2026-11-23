@@ -32,6 +32,7 @@ var team_score_badge: Label
 var copy_button: Button
 var address_options: OptionButton
 var mute_button: Button
+var menu_mute_button: Button
 var sidebar_title: Label
 var sidebar_meta: Label
 var sidebar_hint: Label
@@ -174,6 +175,7 @@ func build_menu() -> void:
 	var frame := panel(menu_layer, Rect2(62, 103, 522, 670), BASE)
 	fill(frame, Rect2(34, 35, 33, 3), MINT)
 	label(frame, Rect2(79, 20, 390, 34), "2–6인 생존 PvP", 16, MINT)
+	menu_mute_button = button(frame, Rect2(362, 18, 122, 38), "소리 켜짐", func(): game.toggle_audio())
 	label(frame, Rect2(32, 67, 452, 79), "RIMFALL", 67)
 	label(frame, Rect2(35, 133, 442, 56), "ARENA", 45, MINT)
 	label(frame, Rect2(38, 197, 446, 28), "상대를 밀어내고 마지막까지 살아남으세요.", 19, SUBTLE)
@@ -420,6 +422,7 @@ func update_view(state: Dictionary, screen: int, local_id: int, status: String,
 	menu_layer.visible = screen < 2
 	game_layer.visible = screen == 2
 	if screen < 2:
+		menu_mute_button.text = "소리 꺼짐" if muted else "소리 켜짐"
 		close_picker()
 		menu_status.text = status
 		host_button.disabled = screen == 1

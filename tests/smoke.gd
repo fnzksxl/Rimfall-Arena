@@ -698,6 +698,8 @@ func test_network() -> void:
 		"projectile hits and syncs both damage and accumulated impact")
 	if not hit_synced:
 		return
+	check(client.state.effects.any(func(effect: Dictionary): return effect.cue == Rules.Cue.HIT and effect.audio_id > 0),
+		"projectile hit cue and sequence reach the remote client")
 	check(server.sim.players[1].kick.length() > 0.0, "projectile applies host-authoritative knockback")
 	client.request_cast.rpc_id(1, client.state.epoch, Rules.MOVE, Vector2.ZERO)
 	await wait_for(func(): return client.state.players[client_id].cooldowns[Rules.MOVE] > 0.0 and client.state.players[client_id].charge > 0.0,

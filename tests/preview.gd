@@ -18,11 +18,31 @@ func capture(name: String) -> void:
 	assert(output == OK)
 
 
+func audio_peak(capture_effect: AudioEffectCapture) -> float:
+	var frames := capture_effect.get_frames_available()
+	assert(frames > 0)
+	var peak := 0.0
+	for sample: Vector2 in capture_effect.get_buffer(frames):
+		peak = maxf(peak, sample.length())
+	return peak
+
+
 func run() -> void:
 	create_timer(12.0).timeout.connect(func(): quit(1))
+	var audio_capture := AudioEffectCapture.new()
+	AudioServer.add_bus_effect(0, audio_capture)
 	var game := Scene.instantiate()
 	root.add_child(game)
 	await capture("menu-preview")
+	await create_timer(0.24).timeout
+	assert(game.sound.bed.playing and game.sound.rhythm.playing)
+	assert(audio_peak(audio_capture) > 0.012)
+	game.hud.menu_mute_button.pressed.emit()
+	await create_timer(0.1).timeout
+	audio_capture.clear_buffer()
+	await create_timer(0.12).timeout
+	assert(game.sound.muted and not game.sound.voice.playing and audio_peak(audio_capture) < 0.002)
+	game.hud.menu_mute_button.pressed.emit()
 	game.practice("파일럿")
 	await capture("shop-preview")
 	assert(game.hud.sidebar.is_visible_in_tree() and game.hud.shop_rows[0].is_visible_in_tree())
@@ -62,8 +82,10 @@ func run() -> void:
 	assert(game.arena.offscreen_markers().is_empty())
 	await create_timer(3.12).timeout
 	game.sim.cast(1, 0, game.sim.players[-1].p)
-	await create_timer(0.25).timeout
+	await create_timer(0.60).timeout
 	await capture("combat-preview")
+	assert(is_equal_approx(game.sound.rhythm.volume_db, -13.0) and game.sound.voice.playing)
+	assert(absf(game.sound.bed.get_playback_position() - game.sound.rhythm.get_playback_position()) < 0.08)
 	assert(not game.hud.sidebar.is_visible_in_tree() and not game.hud.shop_rows[0].is_visible_in_tree())
 	assert(is_equal_approx(game.arena.scale.x, 1.12))
 	var space := InputEventKey.new()
@@ -119,5 +141,12 @@ func run() -> void:
 	game.show_state()
 	await capture("team-combat-preview")
 	assert(game.hud.team_score_badge.is_visible_in_tree() and "블루 3 · 오렌지 3" in game.hud.phase_badge.text)
-	print("RIMFALL SQUARE CAMERA, OFFSCREEN ARROWS, SHOP VISIBILITY AND RIGHT-SIDE INPUT PASSED")
+	game.sound.voice.stop()
+	game.sound.bed.stop()
+	game.sound.rhythm.stop()
+	await create_timer(0.15).timeout
+	AudioServer.remove_bus_effect(0, 0)
+	game.queue_free()
+	await process_frame
+	print("RIMFALL CAMERA, SHOP, TEAM AND AUDIO MIX PASSED")
 	quit()

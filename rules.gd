@@ -27,6 +27,7 @@ const COLORS := [Color("#79f2db"), Color("#ffa574"), Color("#93aaff"),
 	Color("#f7dc72"), Color("#ef93c8"), Color("#adf097")]
 enum { BASIC, Q, E, R, F, MOVE, GEAR }
 enum { BOLT, WAVE, ORB, DISC }
+enum Cue { FIRE, POWER, DASH, GUARD, MARK, HIT, START, RESULT, CLASH, DEFLECT, KNOCKOUT, STRIKE }
 enum { NO_PROC, BOUNCE, ROOT, LINK, SWAP, JAM }
 const LINK_RANGE := 360.0
 const LINK_INTERVAL := 0.65

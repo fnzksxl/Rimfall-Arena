@@ -4,7 +4,7 @@ const Match = preload("res://match.gd")
 const Rules = preload("res://rules.gd")
 const COOLDOWN_TICKS := 20.0
 const MOTION_PAYLOAD_BUDGET := 1320
-const EFFECT_BYTES := 16
+const EFFECT_BYTES := 21
 
 
 static func put_position(buffer: StreamPeerBuffer, value: Vector2) -> void:
@@ -92,6 +92,8 @@ static func encode(game: RefCounted, viewer := 0) -> PackedByteArray:
 		buffer.put_u8(ceili(effect.left * 100.0))
 		buffer.put_u8(roundi(effect.duration * 100.0))
 		buffer.put_u8(effect.damage)
+		buffer.put_8(effect.cue)
+		buffer.put_u32(effect.audio_id)
 	return buffer.data_array
 
 
@@ -162,4 +164,5 @@ static func apply(data: PackedByteArray, state: Dictionary) -> void:
 	for index in range(buffer.get_u8()):
 		state.effects.append({"p": get_position(buffer), "color": Color.hex(buffer.get_u32()),
 			"size": float(buffer.get_u8()), "left": buffer.get_u8() / 100.0,
-			"duration": buffer.get_u8() / 100.0, "damage": buffer.get_u8()})
+			"duration": buffer.get_u8() / 100.0, "damage": buffer.get_u8(),
+			"cue": buffer.get_8(), "audio_id": buffer.get_u32()})
