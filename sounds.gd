@@ -58,8 +58,8 @@ func set_mix(combat: bool, silent: bool) -> void:
 		voice.play()
 	muted = false
 	fade = create_tween().set_parallel(true)
-	fade.tween_property(bed, "volume_db", -15.0 if combat else -17.0, 0.50)
-	fade.tween_property(rhythm, "volume_db", -13.0 if combat else SILENT_DB, 0.50)
+	fade.tween_property(bed, "volume_linear", 0.0 if combat else db_to_linear(-17.0), 0.65)
+	fade.tween_property(rhythm, "volume_linear", db_to_linear(-15.0) if combat else 0.0, 0.65)
 
 
 func play_cue(index: int, offset_db := 0.0) -> void:

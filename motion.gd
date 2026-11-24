@@ -4,7 +4,7 @@ const Match = preload("res://match.gd")
 const Rules = preload("res://rules.gd")
 const COOLDOWN_TICKS := 20.0
 const MOTION_PAYLOAD_BUDGET := 1320
-const EFFECT_BYTES := 21
+const EFFECT_BYTES := 16
 
 
 static func put_position(buffer: StreamPeerBuffer, value: Vector2) -> void:
@@ -56,6 +56,7 @@ static func encode(game: RefCounted, viewer := 0) -> PackedByteArray:
 			put_position(buffer, player.anchor_pos)
 		buffer.put_u8(windup)
 		if windup > 0:
+			buffer.put_u8(player.windup_slot)
 			buffer.put_16(roundi(player.windup_aim.angle() * 8000.0))
 		buffer.put_u8(roundi(player.step_left * 100.0))
 		buffer.put_u8(roundi(player.surge_wait * 100.0))
@@ -100,8 +101,6 @@ static func encode(game: RefCounted, viewer := 0) -> PackedByteArray:
 		buffer.put_u8(ceili(effect.left * 100.0))
 		buffer.put_u8(roundi(effect.duration * 100.0))
 		buffer.put_u8(effect.damage)
-		buffer.put_8(effect.cue)
-		buffer.put_u32(effect.audio_id)
 	return buffer.data_array
 
 
@@ -142,7 +141,9 @@ static func apply(data: PackedByteArray, state: Dictionary) -> void:
 		if player.anchor_left > 0.0:
 			player.anchor_pos = get_position(buffer)
 		player.windup = buffer.get_u8() / 100.0
+		player.windup_slot = -1
 		if player.windup > 0.0:
+			player.windup_slot = buffer.get_u8()
 			player.windup_aim = Vector2.from_angle(buffer.get_16() / 8000.0)
 		player.step_left = buffer.get_u8() / 100.0
 		player.surge_wait = buffer.get_u8() / 100.0
@@ -180,5 +181,4 @@ static func apply(data: PackedByteArray, state: Dictionary) -> void:
 	for index in range(buffer.get_u8()):
 		state.effects.append({"p": get_position(buffer), "color": Color.hex(buffer.get_u32()),
 			"size": float(buffer.get_u8()), "left": buffer.get_u8() / 100.0,
-			"duration": buffer.get_u8() / 100.0, "damage": buffer.get_u8(),
-			"cue": buffer.get_8(), "audio_id": buffer.get_u32()})
+			"duration": buffer.get_u8() / 100.0, "damage": buffer.get_u8()})

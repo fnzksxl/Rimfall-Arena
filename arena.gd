@@ -254,10 +254,16 @@ func _draw() -> void:
 			draw_circle(player.anchor_pos, 16.0, anchor_color, false, 2.2, true)
 			draw_circle(player.anchor_pos, 3.0, anchor_color, true, -1.0, true)
 		if player.windup > 0.0:
-			var charge_color: Color = Rules.SLOTS[Rules.R].color
+			var slot: int = player.windup_slot
+			var charge_color: Color = Rules.SLOTS[slot].color
+			var duration := Rules.cast_delay(slot, player.choices[slot])
 			var aim: Vector2 = player.windup_aim
-			draw_dashed_line(point + aim * 23.0, point + aim * 130.0, charge_color, 2.5, 8.0)
-			draw_arc(point, 25.0, -PI * 0.5, -PI * 0.5 + TAU * (1.0 - player.windup / 0.75),
+			if slot == Rules.E and Rules.skill(slot, player.choices[slot]).id == "repel":
+				var radius: float = Rules.REPEL_RADIUS + 5.0 * (player.levels[slot] - 1)
+				draw_circle(point, radius, Color(charge_color, 0.64), false, 2.0, true)
+			else:
+				draw_dashed_line(point + aim * 23.0, point + aim * 130.0, charge_color, 2.5, 8.0)
+			draw_arc(point, 25.0, -PI * 0.5, -PI * 0.5 + TAU * clampf(1.0 - player.windup / duration, 0.0, 1.0),
 				22, charge_color, 2.1, true)
 		if player.surge_left > 0.0 or player.surge_wait > 0.0:
 			var surge_color: Color = Rules.SLOTS[Rules.F].color
@@ -294,7 +300,7 @@ func _draw() -> void:
 				draw_tag(point + offset, player, decoy_tint)
 		draw_fighter(point, facing, tint, player.guard, player.flash,
 			player.walk, fighter_steps.get(id, 0.0), view)
-		if view != null and clock - view.fire_clock < CombatView.MUZZLE_TIME:
+		if view != null and player.windup <= 0.0 and clock - view.fire_clock < CombatView.MUZZLE_TIME:
 			draw_muzzle(point, player.fire_aim, view)
 		draw_tag(point, player, tint)
 	for fx: Dictionary in state.effects:

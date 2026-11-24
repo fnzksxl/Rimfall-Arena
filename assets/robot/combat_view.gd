@@ -1,6 +1,7 @@
 extends SubViewport
 
 const Robot = preload("res://assets/robot/robot.gd")
+const Rules = preload("res://rules.gd")
 const MODEL_SIZE := 49.0
 const ATTACK_TIME := 0.44
 const MUZZLE_TIME := 0.16
@@ -48,8 +49,13 @@ func update_pose(player: Dictionary, facing: Vector2, step: float, now: float, e
 		fire_id = latest
 	var age := now - fire_clock
 	var walk: Vector2 = player.walk
-	var stride := clampf(walk.length() / preload("res://rules.gd").WALK_SPEED, 0.0, 1.0)
-	if age < ATTACK_TIME:
+	var stride := clampf(walk.length() / Rules.WALK_SPEED, 0.0, 1.0)
+	if player.windup > 0.0:
+		var slot: int = player.windup_slot
+		var duration := Rules.cast_delay(slot, player.choices[slot])
+		facing = player.windup_aim
+		robot.pose_attack(lerpf(0.0, 0.42, clampf(1.0 - player.windup / duration, 0.0, 1.0)), step / TAU, 0.0)
+	elif age < ATTACK_TIME:
 		facing = player.fire_aim
 		robot.pose_attack(lerpf(0.42, 1.0, age / ATTACK_TIME), step / TAU, stride)
 	else:

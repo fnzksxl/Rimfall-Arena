@@ -6,9 +6,8 @@ const Arena = preload("res://arena.gd")
 const Hud = preload("res://hud.gd")
 const Sounds = preload("res://sounds.gd")
 const Motion = preload("res://motion.gd")
-const VERSION := 19
+const VERSION := 26
 const CAST_KEYS := [KEY_Q, KEY_E, KEY_R, KEY_F, KEY_SPACE]
-const CAST_SOUNDS := [Rules.Cue.FIRE, Rules.Cue.POWER, Rules.Cue.MARK, Rules.Cue.POWER, Rules.Cue.GUARD, Rules.Cue.DASH]
 enum { MENU, CONNECTING, ROOM }
 
 var sim := Match.new()
@@ -29,6 +28,7 @@ var sound := Sounds.new()
 var was_firing := false
 var muted := false
 var last_sound_phase := -1
+var last_sent_audio := 0
 var last_cooldowns: Array = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 
@@ -193,6 +193,7 @@ func leave_game(message := "") -> void:
 	status = message
 	last_sound_phase = -1
 	sound.last_effect = 0
+	last_sent_audio = 0
 	last_cooldowns.fill(0.0)
 
 
@@ -318,6 +319,13 @@ func sync_room(data: Dictionary, stamp: int) -> void:
 	receive_state(data, stamp)
 
 
+@rpc("authority", "call_remote", "reliable", 2)
+func sync_audio(events: Array) -> void:
+	if screen == ROOM:
+		var listener: Dictionary = state.players.get(own_id, {})
+		sound.play_effects(events, listener.p if listener.get("alive", false) else arena.camera_focus)
+
+
 @rpc("authority", "call_remote", "unreliable_ordered", 1)
 func sync_motion(data: PackedByteArray, stamp: int, epoch: int) -> void:
 	if screen == ROOM and state.epoch == epoch and stamp > ticks:
@@ -340,6 +348,12 @@ func broadcast_state(reliable: bool) -> void:
 	if practice_mode or multiplayer.get_peers().is_empty():
 		return
 	ticks += 1
+	var audio_events: Array = sim.effects.filter(func(effect: Dictionary): return effect.cue >= 0 and effect.audio_id > last_sent_audio)
+	if not audio_events.is_empty():
+		last_sent_audio = audio_events.back().audio_id
+		for id: int in multiplayer.get_peers():
+			if sim.players.has(id):
+				sync_audio.rpc_id(id, audio_events)
 	if not reliable:
 		var has_cloak: bool = sim.players.values().any(func(player: Dictionary): return player.cloak > 0.0)
 		var shared := PackedByteArray() if has_cloak else Motion.encode(sim)
@@ -435,12 +449,13 @@ func _process(_delta: float) -> void:
 		last_sound_phase = phase
 		last_cooldowns.fill(0.0)
 	var listener: Vector2 = arena.camera_focus if phase == Match.FIGHT else player.get("p", Vector2.ZERO)
-	sound.play_effects(state.get("effects", []), listener)
+	if host:
+		sound.play_effects(state.get("effects", []), listener)
 	if phase == Match.FIGHT and not player.is_empty():
-		for slot in range(Rules.ACTIVE_SLOTS):
+		for slot in [Rules.F, Rules.MOVE]:
 			var cd: float = player.cooldowns[slot]
 			if cd > last_cooldowns[slot] + 0.18:
-				sound.play_cue(CAST_SOUNDS[slot])
+				sound.play_cue(Rules.Cue.GUARD if slot == Rules.F else Rules.Cue.DASH)
 			last_cooldowns[slot] = cd
 
 

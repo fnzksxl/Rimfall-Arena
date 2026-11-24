@@ -5,7 +5,9 @@ const CAPACITY := 6
 const TEAM_SIZE := CAPACITY / 2
 const TEAM_NAMES := ["블루 팀", "오렌지 팀"]
 const TEAM_COLORS := [Color("#8dbbff"), Color("#ffaf81")]
-const START_GOLD := 220
+const START_GOLD := 120
+const AREA_WINDUP := 0.14
+const REPEL_RADIUS := 84.0
 const SHOP_TIME := 25.0
 const HALF_SIDE := 700.0
 const FINAL_HALF_SIDE := 220.0
@@ -17,7 +19,12 @@ const WALK_SPEED := 105.0
 const OUTSIDE_DPS := 14.0
 const BODY_RADIUS := 13.0
 const MAX_IMPACT := 240.0
-const ATTACK_DAMAGE_SCALE := 0.75
+const ATTACK_DAMAGE_SCALE := 0.60
+const IMPACT_PER_DAMAGE := 1.75
+const KNOCKBACK_SPEED_SCALE := 0.84
+const KNOCKBACK_DECAY := 3.9
+const LOW_HEALTH_KNOCKBACK_DECAY := 2.4
+const PROPULSION_DECAY := 4.7
 const PROJECTILE_SPEED_SCALE := 0.60
 const EMERGENCY_DURATION := 2.5
 const EMERGENCY_REDUCTION := 0.60
@@ -44,9 +51,9 @@ const SLOTS := [
 			"shot": {"speed": 640.0, "size": 9.0, "damage": 10, "gain": 3, "force": 255.0, "style": BOLT}},
 	]},
 	{"key": "Q", "name": "투사체 견제", "color": Color("#ffa574"), "price": 120, "options": [
-		{"id": "wave", "name": "충격파", "cd": 6.5, "help": "넓은 직선 파동\n여러 상대를 밀어냄", "upgrade": "피해와 넉백 증가",
-			"shot": {"speed": 430.0, "size": 16.0, "damage": 15, "gain": 4, "force": 340.0, "style": WAVE, "pierce": true}},
-		{"id": "lance", "name": "관통창", "cd": 6.8, "help": "가는 고속 투사체\n상대를 관통", "upgrade": "피해와 넉백 증가",
+		{"id": "wave", "name": "충격파", "cd": 6.5, "help": "넓고 느린 직선 파동\n첫 상대만 강하게 밀어냄", "upgrade": "피해와 넉백 증가",
+			"shot": {"speed": 430.0, "size": 16.0, "damage": 15, "gain": 4, "force": 380.0, "style": WAVE}},
+		{"id": "lance", "name": "관통창", "cd": 6.8, "help": "가는 고속 투사체\n일렬로 선 여러 상대를 관통", "upgrade": "피해와 넉백 증가",
 			"shot": {"speed": 775.0, "size": 6.0, "damage": 16, "gain": 4, "force": 345.0, "style": BOLT, "pierce": true}},
 		{"id": "ricochet", "name": "연쇄 도탄", "cd": 8.0, "help": "맞힌 뒤 주변 새 상대에게\n약해진 탄이 최대 두 번 튐", "upgrade": "피해와 넉백 증가",
 			"shot": {"speed": 565.0, "size": 7.0, "damage": 13, "gain": 3, "force": 280.0, "style": ORB, "proc": BOUNCE}},
@@ -116,6 +123,14 @@ const SLOTS := [
 static func level_cap(slot: int) -> int:
 	return 1 if slot == GEAR else 3
 
+static func shop_slot_open(round_no: int, slot: int) -> bool:
+	return round_no != 1 or slot in [Q, GEAR]
+
+static func cast_delay(slot: int, choice: int) -> float:
+	if slot == R and skill(slot, choice).id == "windup":
+		return 0.75
+	return [0.10, 0.14, AREA_WINDUP, 0.20, 0.0, 0.0][slot]
+
 static func price(slot: int, level: int, choice := 0) -> int:
 	if slot == GEAR:
 		return skill(slot, choice).price
@@ -154,7 +169,11 @@ static func square_extent(point: Vector2) -> float:
 
 static func knockback_multiplier(impact: float) -> float:
 	var progress := clampf(impact / MAX_IMPACT, 0.0, 1.0)
-	return 1.24 + 1.15 * progress / (1.0 + 0.35 * progress)
+	return lerpf(2.30, 3.70, progress)
+
+static func knockback_decay(health: float) -> float:
+	var low_health := clampf(inverse_lerp(60.0, 15.0, health), 0.0, 1.0)
+	return lerpf(KNOCKBACK_DECAY, LOW_HEALTH_KNOCKBACK_DECAY, low_health)
 
 static func award(rank: int) -> int:
 	return 100 + maxi(0, 45 - (rank - 1) * 15)

@@ -528,7 +528,7 @@ func update_view(state: Dictionary, screen: int, local_id: int, status: String,
 			var winner: String = state.get("round_winner", "")
 			center_title.text = "첫 라운드 준비" if round_no == 1 else (
 				"%s 라운드 승리" % winner if not winner.is_empty() else "직전 라운드 무승부")
-			center_detail.text = "초기 자금으로 스킬이나 장비를 구매하세요." if round_no == 1 else "직전 라운드 킬 · 피해량 순위에 따라 골드를 받았습니다."
+			center_detail.text = "Q 스킬 하나를 고르거나 장비를 구매하세요." if round_no == 1 else "직전 라운드 킬 · 피해량 순위에 따라 골드를 받았습니다."
 		Match.COUNTDOWN:
 			center_title.text = "%d" % remaining
 			center_detail.text = "라운드 %d  ·  곧 전투가 시작됩니다." % round_no
@@ -603,7 +603,7 @@ func update_sidebar(state: Dictionary, phase: int, players: Dictionary, local: D
 			for entry_data: Dictionary in state.get("rankings", []):
 				if entry_data.id == game.own_id:
 					reward = "직전 %d위   +%d G" % [entry_data.rank, entry_data.award]
-			sidebar_hint.text = reward if not reward.is_empty() else "슬롯을 눌러 스킬·장비를 고르세요."
+			sidebar_hint.text = reward if not reward.is_empty() else "첫 라운드 구매 · Q 스킬 또는 장비"
 		Match.RESULTS:
 			change_button.text = "대기실로 돌아가기"
 			var feed: Array = state.get("feed", [])
@@ -661,10 +661,11 @@ func update_sidebar(state: Dictionary, phase: int, players: Dictionary, local: D
 		shop_names[slot].position.y = 13 if detail.is_empty() else 5
 		shop_details[slot].text = detail
 		shop_rows[slot].accessibility_name = title if detail.is_empty() else "%s %s" % [title, detail]
-		shop_rows[slot].tooltip_text = "스킬 후보 보기" if multiple else data.help
-		shop_rows[slot].disabled = ready or (not multiple and (maxed or local.gold < cost))
+		var available := Rules.shop_slot_open(state.round, slot)
+		shop_rows[slot].tooltip_text = ("스킬 후보 보기" if multiple else data.help) if available else "2라운드부터 구매 가능"
+		shop_rows[slot].disabled = ready or not available or (not multiple and (maxed or local.gold < cost))
 		shop_prices[slot].add_theme_color_override("font_color", SUBTLE if level > 0 and multiple else GOLD)
-		shop_prices[slot].text = "최대" if maxed else ("강화 ›" if multiple and level > 0 else "%d G" % cost)
+		shop_prices[slot].text = ("최대" if maxed else ("강화 ›" if multiple and level > 0 else "%d G" % cost)) if available else "2R부터"
 
 
 func update_skills(local: Dictionary, phase: int) -> void:
@@ -682,7 +683,7 @@ func update_skills(local: Dictionary, phase: int) -> void:
 			skill_status[slot].text = "재입력 %.1f초" % recast
 		if phase == Match.FIGHT and level > 0:
 			var blocked := Match.cast_block(local, slot)
-			if not blocked.is_empty():
+			if not blocked.is_empty() and (blocked != "시전 중" or slot == local.get("windup_slot", -1)):
 				skill_status[slot].text = blocked
 			elif slot == Rules.MOVE and local.get("cloak", 0.0) > 0.0:
 				skill_status[slot].text = "은신 %.1f초" % local.cloak

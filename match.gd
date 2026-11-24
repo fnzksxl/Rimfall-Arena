@@ -114,13 +114,14 @@ func reset_loadout(player: Dictionary) -> void:
 
 
 func reset_player(player: Dictionary, spawn: Vector2) -> void:
-	player.merge({"p": spawn, "walk": Vector2.ZERO, "kick": Vector2.ZERO,
+	player.merge({"p": spawn, "walk": Vector2.ZERO, "kick": Vector2.ZERO, "kick_decay": Rules.PROPULSION_DECAY,
 		"move": Vector2.ZERO, "aim": -spawn.normalized(), "input_at": -1.0,
 		"hp": 100.0, "impact": 0.0, "alive": true, "kills": 0, "damage": 0,
 		"guard": 0.0, "charge": 0.0, "flash": 0.0, "reflect": 0.0,
 		"gear_time": 0.0, "gear_used": false, "shield_used": false, "last_hit": 0, "last_hit_at": -99.0,
 		"anchor_left": 0.0, "anchor_pos": Vector2.ZERO, "step_left": 0.0,
 		"surge_wait": 0.0, "surge_left": 0.0, "windup": 0.0, "windup_aim": Vector2.RIGHT,
+		"windup_slot": -1, "windup_target": Vector2.ZERO,
 		"fire_id": 0, "fire_at": -99.0, "fire_aim": Vector2.RIGHT,
 		"root": 0.0, "jam": 0.0, "cloak": 0.0, "mirror": 0.0, "mirror_mask": 0, "mirror_axis": Vector2.RIGHT,
 		"link_target": 0, "link_ticks": 0, "link_at": 0.0, "link_damage": 0,
@@ -161,7 +162,7 @@ func enter_shop() -> void:
 		var player: Dictionary = players[id]
 		player.ready = false
 		if id < 0:
-			for slot in ([Rules.Q, Rules.MOVE] if round_no == 1 else [Rules.E, Rules.R, Rules.F, Rules.BASIC, Rules.Q, Rules.MOVE]):
+			for slot in ([Rules.Q] if round_no == 1 else [Rules.E, Rules.R, Rules.F, Rules.BASIC, Rules.Q, Rules.MOVE]):
 				var choice: int = player.choices[slot]
 				if player.levels[slot] == 0 and slot == Rules.Q:
 					choice = [0, 2, 3, 4, 6][-id - 1]
@@ -174,7 +175,7 @@ func enter_shop() -> void:
 func buy(id: int, slot: int, choice := 0) -> void:
 	if phase != SHOP or not players.has(id) or slot < 0 or slot >= Rules.SLOTS.size():
 		return
-	if choice < 0 or choice >= Rules.SLOTS[slot].options.size():
+	if not Rules.shop_slot_open(round_no, slot) or choice < 0 or choice >= Rules.SLOTS[slot].options.size():
 		return
 	var player: Dictionary = players[id]
 	if player.ready:
@@ -258,6 +259,8 @@ static func can_cast(player: Dictionary, slot: int) -> bool:
 
 
 static func cast_block(player: Dictionary, slot: int) -> String:
+	if player.get("windup", 0.0) > 0.0:
+		return "시전 중"
 	if slot != Rules.BASIC and player.get("jam", 0.0) > 0.0:
 		return "교란"
 	if slot == Rules.MOVE and player.get("root", 0.0) > 0.0:
@@ -277,13 +280,12 @@ func cast(id: int, slot: int, target: Vector2) -> void:
 	if not can_cast(player, slot):
 		return
 	player.cloak = 0.0
-	var level: int = player.levels[slot]
 	var offset: Vector2 = (target - player.p).clamp(-AIM_REACH, AIM_REACH)
 	var direction: Vector2 = offset.normalized() if offset.length_squared() > 4.0 else player.aim
 	player.aim = direction
 	var choice: int = player.choices[slot]
-	var skill := Rules.skill(slot, choice)
 	var tint: Color = Rules.SLOTS[slot].color
+	var level: int = player.levels[slot]
 	if recast_window(player, slot) > 0.0:
 		if slot == Rules.F:
 			player.anchor_left = 0.0
@@ -294,39 +296,79 @@ func cast(id: int, slot: int, target: Vector2) -> void:
 		else:
 			player.step_left = 0.0
 			player.kick = direction * (505.0 + (level - 1) * 65.0)
+			player.kick_decay = Rules.PROPULSION_DECAY
 		effect(player.p, tint, 40.0, 0.32)
 		return
 	player.cooldowns[slot] = Rules.cooldown(slot, choice, level)
+	var delay := Rules.cast_delay(slot, choice)
+	var aim_point: Vector2 = player.p + offset
+	if delay > 0.0:
+		match Rules.skill(slot, choice).id:
+			"mark":
+				aim_point = player.p + offset.limit_length(330.0)
+			"scatter":
+				aim_point = player.p + offset.limit_length(250.0)
+			"repeater":
+				aim_point = (player.p + offset.limit_length(235.0)).clamp(-MAP_EDGE, MAP_EDGE)
+			"gravity":
+				aim_point = player.p + offset.limit_length(300.0)
+		player.windup = delay
+		player.windup_slot = slot
+		player.windup_aim = direction
+		player.windup_target = aim_point
+		player.walk = Vector2.ZERO
+	else:
+		release_cast(id, slot, direction, aim_point)
+
+
+func release_pending_cast(id: int) -> void:
+	var player: Dictionary = players[id]
+	var slot: int = player.windup_slot
+	player.windup = 0.0
+	player.windup_slot = -1
+	release_cast(id, slot, player.windup_aim, player.windup_target)
+
+
+func release_cast(id: int, slot: int, direction: Vector2, target: Vector2) -> void:
+	var player: Dictionary = players[id]
+	var level: int = player.levels[slot]
+	var skill := Rules.skill(slot, player.choices[slot])
+	var tint: Color = Rules.SLOTS[slot].color
+	if slot <= Rules.R:
+		serial += 1
+		player.merge({"fire_id": serial, "fire_at": elapsed, "fire_aim": direction}, true)
+		var cue: int = [Rules.Cue.FIRE, Rules.Cue.POWER, Rules.Cue.MARK, Rules.Cue.POWER][slot]
+		effect(player.p + direction * 21.0, tint, 27.0, 0.19, 0, cue)
 	match skill.id:
 		"pulse", "wave", "lance", "heavy", "recoil", "disc", "curve", "seeker", \
 		"ricochet", "snare", "link", "swap", "jam":
 			shoot(id, slot, direction, player.p + direction * 20.0, skill.shot, level)
 			if skill.id == "recoil":
 				player.kick = player.kick * 0.5 - direction * 410.0
-			effect(player.p + direction * 21.0, tint, 27.0, 0.19)
+				player.kick_decay = Rules.PROPULSION_DECAY
 		"mark":
-			add_strike(id, slot, player.p + offset.limit_length(330.0), 46.0, 0.70, 24, 505.0, level)
+			add_strike(id, slot, target, 46.0, 0.70 - Rules.AREA_WINDUP, 24, 505.0, level)
 		"repel":
-			add_strike(id, slot, player.p, 84.0, 0.16, 16, 525.0, level, false, true)
+			add_strike(id, slot, player.p, Rules.REPEL_RADIUS, 0.16 - Rules.AREA_WINDUP, 16, 525.0, level, false, true)
 		"fissure":
 			for index in range(3):
 				var pos: Vector2 = player.p + direction * (85.0 + index * 85.0)
-				add_strike(id, slot, pos, 29.0, 0.42 + index * 0.16, 12, 325.0, level)
+				add_strike(id, slot, pos, 29.0, 0.42 - Rules.AREA_WINDUP + index * 0.16, 12, 325.0, level)
 		"scatter":
-			var delay := 0.74
-			strikes.append({"owner": id, "slot": slot, "p": player.p + offset.limit_length(250.0),
+			var delay := 0.74 - Rules.AREA_WINDUP
+			strikes.append({"owner": id, "slot": slot, "p": target,
 				"left": delay, "duration": delay, "size": 30.0, "pull": false,
 				"scatter": true, "angle": direction.angle(), "skill": skill, "level": level})
 		"repeater":
-			var origin: Vector2 = (player.p + offset.limit_length(235.0)).clamp(-MAP_EDGE, MAP_EDGE)
-			strikes.append({"owner": id, "slot": slot, "p": origin, "left": 0.58, "duration": 0.58,
+			var delay := 0.58 - Rules.AREA_WINDUP
+			strikes.append({"owner": id, "slot": slot, "p": target, "left": delay, "duration": delay,
 				"size": 23.0, "pull": false, "repeats": 3, "angle": direction.angle(), "skill": skill, "level": level})
 		"gravity":
-			add_strike(id, slot, player.p + offset.limit_length(300.0), 64.0, 1.05, 27, 685.0, level, true)
+			add_strike(id, slot, target, 64.0, 0.85, 27, 685.0, level, true)
 		"windup":
-			player.windup = 0.75
-			player.windup_aim = direction
-			effect(player.p, tint, 30.0, 0.30)
+			shoot(id, slot, direction, player.p + direction * 20.0, skill.shot, level)
+			player.kick = player.kick * 0.65 - direction * 255.0
+			player.kick_decay = Rules.PROPULSION_DECAY
 		"guard":
 			player.guard = 0.85 + (level - 1) * 0.25
 			effect(player.p, tint, 40.0, 0.30)
@@ -360,6 +402,7 @@ func cast(id: int, slot: int, target: Vector2) -> void:
 		"double":
 			player.step_left = 0.90
 			player.kick = player.kick * 0.18 + direction * (505.0 + (level - 1) * 65.0)
+			player.kick_decay = Rules.PROPULSION_DECAY
 			effect(player.p, tint, 38.0, 0.26)
 		"dash", "recover", "tackle":
 			var speed := 700.0 if skill.id == "dash" else 825.0
@@ -374,13 +417,13 @@ func cast(id: int, slot: int, target: Vector2) -> void:
 			elif skill.id == "tackle":
 				player.charge = 0.37
 			player.kick = player.kick * 0.24 + direction * (speed + (level - 1) * 75.0)
+			player.kick_decay = Rules.PROPULSION_DECAY
 			effect(player.p, tint, 45.0, 0.32)
 
 
 func shoot(id: int, slot: int, direction: Vector2, origin: Vector2, profile: Dictionary, level: int) -> void:
 	serial += 1
 	var shooter: Dictionary = players.get(id, {})
-	shooter.merge({"fire_id": serial, "fire_at": elapsed, "fire_aim": direction}, true)
 	var speed_factor := Rules.PROJECTILE_SPEED_SCALE * Rules.equipment_factor(shooter, "shot_speed")
 	var speed: float = profile.speed * speed_factor
 	shots.append({"id": serial, "owner": id, "p": origin.clamp(-MAP_EDGE, MAP_EDGE),
@@ -414,19 +457,22 @@ func hit(owner: int, victim: int, damage: int, force: float, direction: Vector2,
 		effect(player.p, Rules.SLOTS[Rules.GEAR].color, 47.0, 0.33, 0, Rules.Cue.DEFLECT)
 	var health_lost := minf(damage, player.hp)
 	player.hp = maxf(0.0, player.hp - damage)
-	player.impact = minf(Rules.MAX_IMPACT, player.impact + damage * 1.35 * Rules.equipment_factor(player, "impact"))
+	player.impact = minf(Rules.MAX_IMPACT, player.impact + damage * Rules.IMPACT_PER_DAMAGE * Rules.equipment_factor(player, "impact"))
 	player.cloak = 0.0
 	if interrupt:
 		player.charge = 0.0
-		player.windup = 0.0
+		if player.windup_slot == Rules.R and Rules.skill(Rules.R, player.choices[Rules.R]).id == "windup":
+			player.windup = 0.0
+			player.windup_slot = -1
 	if player.surge_wait > 0.0:
 		player.surge_wait = 0.0
 		player.surge_left = 1.45 + (player.levels[Rules.F] - 1) * 0.24
 		effect(player.p, Rules.SLOTS[Rules.F].color, 48.0, 0.40)
 	var resistance: float = protection * (0.30 if player.guard > 0.0 else 1.0) * Rules.equipment_factor(player, "knockback")
 	if force > 0.0:
-		player.kick = (player.kick * 0.55 + direction * force *
-			Rules.knockback_multiplier(player.impact) * resistance).limit_length(1800.0)
+		var speed := force * Rules.knockback_multiplier(player.impact) * resistance * Rules.KNOCKBACK_SPEED_SCALE
+		player.kick = (player.kick * 0.55 + direction * speed).limit_length(1800.0 * Rules.KNOCKBACK_SPEED_SCALE)
+		player.kick_decay = Rules.knockback_decay(player.hp)
 	player.flash = 0.16
 	player.last_hit = owner
 	player.last_hit_at = elapsed
@@ -516,11 +562,11 @@ func step_fight(delta: float) -> void:
 		var speed := Rules.WALK_SPEED * Rules.equipment_factor(player, "walk") * (1.24 if player.surge_left > 0.0 else 1.0)
 		if player.cloak > 0.0:
 			speed *= 1.22
-		if player.root > 0.0:
+		if player.root > 0.0 or player.windup > 0.0:
 			speed = 0.0
 		player.walk = player.walk.move_toward(intent * speed, 1100.0 * delta)
 		player.p = (player.p + (player.walk + player.kick) * delta).clamp(-MAP_EDGE, MAP_EDGE)
-		player.kick *= exp(-4.7 * delta)
+		player.kick *= exp(-player.kick_decay * delta)
 	resolve_projectiles(delta, previous_positions)
 	resolve_strikes(delta)
 	resolve_charges(delta, previous_positions)
@@ -532,12 +578,8 @@ func step_fight(delta: float) -> void:
 			continue
 		if player.windup > 0.0:
 			player.windup = maxf(0.0, player.windup - delta)
-			if player.windup <= 0.0:
-				var aim: Vector2 = player.windup_aim
-				var skill := Rules.skill(Rules.R, player.choices[Rules.R])
-				shoot(id, Rules.R, aim, player.p + aim * 20.0, skill.shot, player.levels[Rules.R])
-				player.kick = player.kick * 0.65 - aim * 255.0
-				effect(player.p + aim * 22.0, Rules.SLOTS[Rules.R].color, 35.0, 0.24)
+			if player.windup <= 0.000001:
+				release_pending_cast(id)
 		var outside := Rules.square_extent(player.p) > half_side
 		if outside and Rules.EMERGENCY_GEAR in player.equipment and not player.gear_used:
 			player.gear_time = Rules.EMERGENCY_DURATION
@@ -739,7 +781,7 @@ func projectile_status(shot: Dictionary, target: Dictionary, victim: int) -> voi
 				caster.link_target = victim
 				caster.link_ticks = 3
 				caster.link_at = elapsed + Rules.LINK_INTERVAL
-				caster.link_damage = 2 + shot.level
+				caster.link_damage = 1 + shot.level
 
 
 func resolve_links() -> void:

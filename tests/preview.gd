@@ -4,6 +4,7 @@ const Scene = preload("res://main.tscn")
 const Match = preload("res://match.gd")
 const Arena = preload("res://arena.gd")
 const Rules = preload("res://rules.gd")
+const Motion = preload("res://motion.gd")
 
 
 func _initialize() -> void:
@@ -27,8 +28,72 @@ func audio_peak(capture_effect: AudioEffectCapture) -> float:
 	return peak
 
 
+func test_remote_hit_audio(audio_capture: AudioEffectCapture) -> bool:
+	var rooms: Array[Node] = []
+	for room_name in ["AudioHost", "AudioClient"]:
+		var room := Node.new()
+		room.name = room_name
+		root.add_child(room)
+		set_multiplayer(SceneMultiplayer.new(), room.get_path())
+		var game := Scene.instantiate()
+		room.add_child(game)
+		rooms.append(game)
+	var server := rooms[0]
+	var client := rooms[1]
+	server.toggle_audio()
+	server.host_game("Host", "27456")
+	client.join_game("Client", "127.0.0.1", "27456")
+	while client.screen != client.ROOM:
+		await process_frame
+	server.set_physics_process(false)
+	client.set_physics_process(false)
+	server.sim.start_match()
+	server.sim.begin_countdown()
+	server.sim.advance(3.0)
+	server.sim.reset_player(server.sim.players[1], Vector2(-100, 0))
+	server.sim.reset_player(server.sim.players[client.own_id], Vector2(100, 0))
+	server.broadcast_state(true)
+	while client.state.phase != Match.FIGHT:
+		await process_frame
+	await create_timer(0.50).timeout
+	client.sound.bed.stop()
+	client.sound.rhythm.stop()
+	await create_timer(0.10).timeout
+	server.sim.cast(1, Rules.BASIC, Vector2(100, 0))
+	server.sim.advance(Rules.cast_delay(Rules.BASIC, 0))
+	server.broadcast_state(false)
+	await create_timer(0.22).timeout
+	audio_capture.clear_buffer()
+	server.sim.advance(0.55)
+	assert(server.sim.players[client.own_id].hp == 94.0)
+	# Fill the visual packet so the hit effect cannot fit in its remaining budget.
+	var pulse: Dictionary = Rules.skill(Rules.BASIC, 0).shot
+	for index in range(73):
+		server.sim.shoot(1, Rules.BASIC, Vector2.RIGHT, Vector2(900, index), pulse, 1)
+	var visual: Dictionary = server.sim.snapshot().duplicate(true)
+	Motion.apply(Motion.encode(server.sim), visual)
+	server.broadcast_state(false)
+	await create_timer(0.22).timeout
+	var peak := audio_peak(audio_capture)
+	var heard: bool = (visual.effects.is_empty()
+		and not client.state.effects.any(func(effect: Dictionary): return effect.damage > 0)
+		and client.sound.last_effect == server.sim.audio_serial
+		and client.sound.last_effect > 0 and peak > 0.012)
+	print("Remote hit audio: cue=", client.sound.last_effect, " peak=", peak, " visual effects=", client.state.effects.size())
+	client.sound.voice.stop()
+	server.sound.voice.stop()
+	server.sound.bed.stop()
+	server.sound.rhythm.stop()
+	await create_timer(0.15).timeout
+	client.leave_game()
+	server.leave_game()
+	client.get_parent().queue_free()
+	server.get_parent().queue_free()
+	return heard
+
+
 func run() -> void:
-	create_timer(12.0).timeout.connect(func(): quit(1))
+	create_timer(22.0).timeout.connect(func(): quit(1))
 	var audio_capture := AudioEffectCapture.new()
 	AudioServer.add_bus_effect(0, audio_capture)
 	var game := Scene.instantiate()
@@ -44,18 +109,25 @@ func run() -> void:
 	assert(game.sound.muted and not game.sound.voice.playing and audio_peak(audio_capture) < 0.002)
 	game.hud.menu_mute_button.pressed.emit()
 	game.practice("파일럿")
+	await capture("character-picker-preview")
+	assert(game.hud.character_picker.is_visible_in_tree())
+	game.hud.character_buttons[2].pressed.emit()
+	assert(game.sim.players[1].character == 2)
+	game.hud.change_button.pressed.emit()
 	await capture("shop-preview")
 	assert(game.hud.sidebar.is_visible_in_tree() and game.hud.shop_rows[0].is_visible_in_tree())
+	assert(game.sim.players[1].gold == 120 and game.hud.shop_rows[Rules.MOVE].disabled)
 	game.hud.shop_rows[Rules.GEAR].pressed.emit()
 	await capture("gear-shop-preview")
 	assert(game.hud.option_cards[4].is_visible_in_tree() and "110 G" in game.hud.option_actions[1].text)
 	game.hud.picker_tabs[1].pressed.emit()
 	await capture("combat-gear-shop-preview")
 	assert(game.hud.option_names[3].text == "차폐 전지" and not game.hud.option_cards[4].is_visible_in_tree())
-	game.hud.option_actions[3].pressed.emit()
+	assert(game.hud.option_actions[3].disabled)
+	game.hud.option_actions[0].pressed.emit()
 	await process_frame
-	assert(Rules.SHIELD_GEAR in game.sim.players[1].equipment)
-	game.hud.option_actions[3].pressed.emit()
+	assert(game.sim.players[1].equipment == [5])
+	game.hud.option_actions[0].pressed.emit()
 	await process_frame
 	assert(game.sim.players[1].equipment.is_empty())
 	game.sim.players[1].gold = Rules.START_GOLD
@@ -65,12 +137,18 @@ func run() -> void:
 	game.hud.picker_tabs[1].pressed.emit()
 	await capture("snare-picker-preview")
 	assert(game.hud.option_names[0].text == "구속탄" and not game.hud.option_cards[1].is_visible_in_tree())
+	game.hud.option_actions[0].pressed.emit()
+	assert(game.sim.players[1].gold == 0)
+	game.sim.finish_round(1)
+	game.broadcast_state(true)
+	await process_frame
+	await process_frame
+	assert(not game.hud.shop_rows[Rules.MOVE].disabled)
 	game.hud.shop_rows[Rules.MOVE].pressed.emit()
 	await capture("skill-picker-preview")
 	assert(game.hud.picker.is_visible_in_tree() and "몸통박치기" in game.hud.option_names[2].text)
 	assert(game.hud.option_cards[4].is_visible_in_tree() and not game.hud.option_cards[5].is_visible_in_tree())
 	game.hud.option_actions[2].pressed.emit()
-	game.buy_slot(Rules.Q)
 	assert(game.sim.players[1].choices[Rules.MOVE] == 2)
 	game.hud.shop_rows[Rules.MOVE].pressed.emit()
 	await capture("skill-picker-locked-preview")
@@ -81,10 +159,17 @@ func run() -> void:
 	assert(game.sim.phase == Match.COUNTDOWN and not game.hud.sidebar.is_visible_in_tree())
 	assert(game.arena.offscreen_markers().is_empty())
 	await create_timer(3.12).timeout
+	game.set_physics_process(false)
 	game.sim.cast(1, 0, game.sim.players[-1].p)
-	await create_timer(0.60).timeout
+	game.sim.advance(0.05)
+	game.broadcast_state(true)
+	await capture("attack-windup-preview")
+	assert(game.sim.players[1].windup > 0.0 and game.sim.shots.is_empty())
+	game.set_physics_process(true)
+	await create_timer(0.75).timeout
 	await capture("combat-preview")
-	assert(is_equal_approx(game.sound.rhythm.volume_db, -13.0) and game.sound.voice.playing)
+	assert(is_equal_approx(game.sound.rhythm.volume_db, -15.0) and is_zero_approx(game.sound.bed.volume_linear))
+	assert(game.sound.voice.playing)
 	assert(absf(game.sound.bed.get_playback_position() - game.sound.rhythm.get_playback_position()) < 0.08)
 	assert(not game.hud.sidebar.is_visible_in_tree() and not game.hud.shop_rows[0].is_visible_in_tree())
 	assert(is_equal_approx(game.arena.scale.x, 1.12))
@@ -133,6 +218,11 @@ func run() -> void:
 	game.hud.bot_options.select(2)
 	await capture("team-menu-preview")
 	game.hud.practice_button.pressed.emit()
+	await capture("team-character-picker-preview")
+	assert(game.hud.character_picker.is_visible_in_tree())
+	game.hud.character_buttons[4].pressed.emit()
+	assert(game.sim.players[1].character == 4)
+	game.hud.change_button.pressed.emit()
 	await capture("team-shop-preview")
 	assert(game.sim.mode == Match.TEAM_MATCH and Match.team_counts(game.sim.players) == [3, 3])
 	game.primary_action()
@@ -145,8 +235,13 @@ func run() -> void:
 	game.sound.bed.stop()
 	game.sound.rhythm.stop()
 	await create_timer(0.15).timeout
-	AudioServer.remove_bus_effect(0, 0)
 	game.queue_free()
 	await process_frame
+	var heard := await test_remote_hit_audio(audio_capture)
+	AudioServer.remove_bus_effect(0, 0)
+	if not heard:
+		printerr("Remote hit audio was not isolated from the visual packet")
+		quit(1)
+		return
 	print("RIMFALL CAMERA, SHOP, TEAM AND AUDIO MIX PASSED")
 	quit()
