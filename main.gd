@@ -6,8 +6,9 @@ const Arena = preload("res://arena.gd")
 const Hud = preload("res://hud.gd")
 const Sounds = preload("res://sounds.gd")
 const Motion = preload("res://motion.gd")
-const VERSION := 26
+const VERSION := 28
 const CAST_KEYS := [KEY_Q, KEY_E, KEY_R, KEY_F, KEY_SPACE]
+const CONTROLS_PATH := "user://controls.cfg"
 enum { MENU, CONNECTING, ROOM }
 
 var sim := Match.new()
@@ -26,6 +27,8 @@ var arena := Arena.new()
 var hud := Hud.new()
 var sound := Sounds.new()
 var was_firing := false
+var preview_casts := false
+var aim_slot := -1
 var muted := false
 var last_sound_phase := -1
 var last_sent_audio := 0
@@ -34,6 +37,10 @@ var last_cooldowns: Array = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 func _ready() -> void:
 	get_window().title = "Rimfall Arena %s" % ProjectSettings.get_setting("application/config/version")
+	var controls := ConfigFile.new()
+	if controls.load(CONTROLS_PATH) == OK:
+		preview_casts = bool(controls.get_value("controls", "preview_casts", false))
+	get_window().focus_exited.connect(clear_cast_preview)
 	add_child(arena)
 	hud.game = self
 	add_child(hud)
@@ -178,6 +185,7 @@ func peer_left(id: int) -> void:
 
 
 func leave_game(message := "") -> void:
+	clear_cast_preview()
 	var peer := multiplayer.multiplayer_peer
 	screen = MENU
 	host = false
@@ -216,6 +224,20 @@ func copy_address(index: int) -> void:
 func toggle_audio() -> void:
 	muted = not muted
 	sound.set_mix(state.get("phase") == Match.FIGHT, muted)
+
+
+func set_cast_mode(mode: int) -> void:
+	preview_casts = mode == 1
+	clear_cast_preview()
+	hud.update_cast_mode(mode)
+	var controls := ConfigFile.new()
+	controls.set_value("controls", "preview_casts", preview_casts)
+	controls.save(CONTROLS_PATH)
+
+
+func clear_cast_preview() -> void:
+	aim_slot = -1
+	was_firing = false
 
 
 func primary_action() -> void:
@@ -392,7 +414,7 @@ func _physics_process(delta: float) -> void:
 		if not firing:
 			was_firing = false
 	else:
-		was_firing = false
+		clear_cast_preview()
 	if host:
 		var epoch := sim.epoch
 		var feed_revision := sim.feed_revision
@@ -409,11 +431,17 @@ func _input(event: InputEvent) -> void:
 	if not event is InputEventKey or not event.pressed or event.echo:
 		return
 	if event.physical_keycode == KEY_ESCAPE:
+		clear_cast_preview()
 		hud.close_picker()
 	if screen == ROOM and state.get("phase") == Match.FIGHT:
 		var slot := CAST_KEYS.find(event.physical_keycode)
 		if slot >= 0:
-			try_cast(slot + 1)
+			if preview_casts and slot + 1 <= Rules.R:
+				begin_cast_preview(slot + 1)
+			else:
+				if aim_slot >= 0:
+					clear_cast_preview()
+				try_cast(slot + 1)
 			get_viewport().set_input_as_handled()
 
 
@@ -422,8 +450,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		if Arena.COMBAT_VIEW.has_point(event.position):
-			was_firing = true
-			try_cast(0)
+			if aim_slot >= 0:
+				var slot := aim_slot
+				clear_cast_preview()
+				try_cast(slot)
+			else:
+				was_firing = true
+				try_cast(Rules.BASIC)
+			get_viewport().set_input_as_handled()
+
+
+func begin_cast_preview(slot: int) -> void:
+	var local: Dictionary = state.players.get(own_id, {})
+	if Match.can_cast(local, slot):
+		aim_slot = slot
+		was_firing = false
 
 
 func try_cast(slot: int) -> void:
@@ -463,4 +504,5 @@ func show_state() -> void:
 	arena.menu = screen < ROOM
 	arena.state = state
 	arena.own_id = own_id
+	arena.preview_slot = aim_slot
 	hud.update_view(state, screen, own_id, status, host, muted, practice_mode)

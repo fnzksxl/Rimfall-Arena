@@ -4,7 +4,11 @@ const Match = preload("res://match.gd")
 const Rules = preload("res://rules.gd")
 const COOLDOWN_TICKS := 20.0
 const MOTION_PAYLOAD_BUDGET := 1320
-const EFFECT_BYTES := 16
+const EFFECT_VFX_BYTES := 3
+const EFFECT_BYTES := 16 + EFFECT_VFX_BYTES + 2
+const PLAYER_VFX_BYTES := 2
+const SHOT_VFX_MASK := 0x3f
+const NO_EFFECT_ANGLE := 32767
 
 
 static func put_position(buffer: StreamPeerBuffer, value: Vector2) -> void:
@@ -91,9 +95,12 @@ static func encode(game: RefCounted, viewer := 0) -> PackedByteArray:
 			buffer.put_16(roundi(strike.angle * 8000.0))
 		if flags & 0x20:
 			buffer.put_u8(strike.repeats)
-	var effect_count := clampi(floori((MOTION_PAYLOAD_BUDGET - buffer.get_size() - 1) / float(EFFECT_BYTES)), 0, game.effects.size())
+	var visual_bytes: int = game.players.size() * PLAYER_VFX_BYTES + game.shots.size() + game.strikes.size()
+	var remaining := MOTION_PAYLOAD_BUDGET - buffer.get_size() - 1
+	var effect_count := clampi(floori((remaining - visual_bytes) / float(EFFECT_BYTES)), 0, game.effects.size())
 	buffer.put_u8(effect_count)
-	for index in range(game.effects.size() - effect_count, game.effects.size()):
+	var start_effect: int = game.effects.size() - effect_count
+	for index in range(start_effect, game.effects.size()):
 		var effect: Dictionary = game.effects[index]
 		put_position(buffer, effect.p)
 		buffer.put_u32(effect.color.to_rgba32())
@@ -101,6 +108,25 @@ static func encode(game: RefCounted, viewer := 0) -> PackedByteArray:
 		buffer.put_u8(ceili(effect.left * 100.0))
 		buffer.put_u8(roundi(effect.duration * 100.0))
 		buffer.put_u8(effect.damage)
+	# Keep the original effect records intact for clients without the VFX trailer.
+	for index in range(start_effect, game.effects.size()):
+		var effect: Dictionary = game.effects[index]
+		var direction: Vector2 = effect.direction
+		buffer.put_8(effect.cue)
+		buffer.put_16(NO_EFFECT_ANGLE if direction.is_zero_approx() else roundi(direction.angle() * 8000.0))
+	# Append the styles after the phase-one cue and direction records.
+	for index in range(start_effect, game.effects.size()):
+		buffer.put_u8(game.effects[index].vfx)
+	if remaining >= visual_bytes:
+		for player: Dictionary in game.players.values():
+			buffer.put_u8(roundi(player.propulsion * 100.0))
+			buffer.put_u8(clampi(ceili((player.link_at - game.elapsed) * 100.0), 0, 255))
+		for shot: Dictionary in game.shots:
+			buffer.put_u8(shot.vfx | (shot.visual_step << 6))
+		for strike: Dictionary in game.strikes:
+			buffer.put_u8(strike.vfx)
+		for index in range(start_effect, game.effects.size()):
+			buffer.put_u8(game.effects[index].value)
 	return buffer.data_array
 
 
@@ -112,9 +138,11 @@ static func apply(data: PackedByteArray, state: Dictionary) -> void:
 	state.half_side = buffer.get_float()
 	if state.phase != Match.FIGHT:
 		return
+	var motion_players: Array[Dictionary] = []
 	for index in range(buffer.get_u8()):
 		var id := buffer.get_u32()
 		var player: Dictionary = state.players.get(id, {})
+		motion_players.append(player)
 		player.p = get_position(buffer)
 		player.aim = Vector2.from_angle(buffer.get_16() / 8000.0)
 		player.walk = Vector2(buffer.get_16(), buffer.get_16())
@@ -155,6 +183,8 @@ static func apply(data: PackedByteArray, state: Dictionary) -> void:
 		if player.mirror_mask != 0:
 			player.mirror_axis = Vector2.from_angle(buffer.get_16() / 8000.0)
 		player.link_target = buffer.get_32()
+		player.link_at = state.elapsed + Rules.LINK_INTERVAL
+		player.propulsion = 0.0
 		var cooldowns: Array[float] = []
 		for slot in range(Rules.ACTIVE_SLOTS):
 			cooldowns.append(buffer.get_u8() / COOLDOWN_TICKS)
@@ -182,3 +212,24 @@ static func apply(data: PackedByteArray, state: Dictionary) -> void:
 		state.effects.append({"p": get_position(buffer), "color": Color.hex(buffer.get_u32()),
 			"size": float(buffer.get_u8()), "left": buffer.get_u8() / 100.0,
 			"duration": buffer.get_u8() / 100.0, "damage": buffer.get_u8()})
+	if buffer.get_available_bytes() >= state.effects.size() * EFFECT_VFX_BYTES:
+		for effect: Dictionary in state.effects:
+			effect.cue = buffer.get_8()
+			var angle := buffer.get_16()
+			effect.direction = Vector2.ZERO if angle == NO_EFFECT_ANGLE else Vector2.from_angle(angle / 8000.0)
+		if buffer.get_available_bytes() >= state.effects.size():
+			for effect: Dictionary in state.effects:
+				effect.vfx = buffer.get_u8()
+			var visual_bytes: int = motion_players.size() * PLAYER_VFX_BYTES + state.shots.size() + state.strikes.size() + state.effects.size()
+			if buffer.get_available_bytes() >= visual_bytes:
+				for player: Dictionary in motion_players:
+					player.propulsion = buffer.get_u8() / 100.0
+					player.link_at = state.elapsed + buffer.get_u8() / 100.0
+				for shot: Dictionary in state.shots:
+					var visual_code := buffer.get_u8()
+					shot.vfx = visual_code & SHOT_VFX_MASK
+					shot.visual_step = visual_code >> 6
+				for strike: Dictionary in state.strikes:
+					strike.vfx = buffer.get_u8()
+				for effect: Dictionary in state.effects:
+					effect.value = buffer.get_u8()

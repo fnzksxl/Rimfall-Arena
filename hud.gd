@@ -24,6 +24,7 @@ var host_button: Button
 var join_button: Button
 var practice_button: Button
 var mode_options: OptionButton
+var cast_options: Array[OptionButton] = []
 var bot_options: OptionButton
 var menu_status: Label
 var sidebar: Panel
@@ -175,7 +176,7 @@ func entry(parent: Control, rect: Rect2, value: String, hint: String, limit: int
 
 func build_menu() -> void:
 	menu_layer = layer()
-	var frame := panel(menu_layer, Rect2(62, 103, 522, 670), BASE)
+	var frame := panel(menu_layer, Rect2(62, 103, 522, 710), BASE)
 	fill(frame, Rect2(34, 35, 33, 3), MINT)
 	label(frame, Rect2(79, 20, 390, 34), "2–6인 생존 PvP", 16, MINT)
 	menu_mute_button = button(frame, Rect2(362, 18, 122, 38), "소리 켜짐", func(): game.toggle_audio())
@@ -201,8 +202,25 @@ func build_menu() -> void:
 	practice_button = button(frame, Rect2(208, 546, 276, 48), "봇과 연습", func():
 		game.practice(nickname.text, bot_options.get_selected_id(), mode_options.get_selected_id()))
 	update_bot_options(mode_options.selected)
-	menu_status = label(frame, Rect2(38, 608, 446, 35), "", 15, AMBER)
-	label(menu_layer, Rect2(65, 794, 565, 34), "WASD 이동  ·  마우스 조준  ·  좌클릭 / Q / E / R / F / Space", 16, SUBTLE)
+	label(frame, Rect2(38, 609, 102, 40), "스킬 조작", 15, SUBTLE)
+	add_cast_mode(frame, Rect2(144, 609, 340, 40))
+	menu_status = label(frame, Rect2(38, 657, 446, 35), "", 15, AMBER)
+	label(menu_layer, Rect2(65, 827, 565, 34), "WASD 이동  ·  마우스 조준  ·  좌클릭 / Q / E / R / F / Space", 16, SUBTLE)
+
+
+func add_cast_mode(parent: Control, rect: Rect2) -> void:
+	var control := selector(parent, rect, "공격 스킬 조작")
+	control.add_item("즉시 입력")
+	control.add_item("궤적 표시")
+	control.select(int(game.preview_casts))
+	control.tooltip_text = "궤적 표시에서는 Q·E·R을 누르고, 전장에 좌클릭하면 선택한 스킬을 시전합니다. Esc로 취소합니다."
+	control.item_selected.connect(func(mode: int): game.set_cast_mode(mode))
+	cast_options.append(control)
+
+
+func update_cast_mode(mode: int) -> void:
+	for control in cast_options:
+		control.select(mode)
 
 
 func selector(parent: Control, rect: Rect2, accessible: String) -> OptionButton:
@@ -238,7 +256,8 @@ func build_game() -> void:
 	fill(header, Rect2(20, 21, 3, 28), MINT)
 	label(header, Rect2(36, 15, 288, 41), "RIMFALL ARENA", 25)
 	round_badge = label(header, Rect2(322, 16, 240, 38), "", 18, MINT)
-	phase_badge = label(header, Rect2(588, 12, 355, 45), "", 22, TEXT, HORIZONTAL_ALIGNMENT_CENTER)
+	add_cast_mode(header, Rect2(524, 14, 118, 40))
+	phase_badge = label(header, Rect2(648, 12, 292, 45), "", 22, TEXT, HORIZONTAL_ALIGNMENT_CENTER)
 	team_score_badge = label(header, Rect2(946, 15, 155, 39), "", 16, SUBTLE, HORIZONTAL_ALIGNMENT_CENTER)
 	mute_button = button(header, Rect2(1116, 14, 116, 40), "소리 켜짐", func(): game.toggle_audio())
 	button(header, Rect2(1244, 14, 120, 40), "방 나가기", func(): game.leave_game())

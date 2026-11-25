@@ -144,6 +144,9 @@ func test_attack_windup() -> void:
 	check(player.p.y > start.y and game.shots.size() == 1 and game.shots[0].v.x > 0.0
 		and game.effects.back().cue == Rules.Cue.POWER and player.fire_id > 0,
 		"knockback moves the caster and the attack releases with its original aim and sound")
+	Motion.apply(Motion.encode(game), remote)
+	check(remote.shots.size() == 1 and remote.shots[0].vfx == Rules.Vfx.WAVE,
+		"remote projectile keeps the skill-specific visual")
 	game.advance(0.02)
 	check(player.walk.y < 0.0, "held movement resumes after release")
 
@@ -238,8 +241,13 @@ func test_loadouts() -> void:
 	game.reset_player(pilot, Vector2(-23, 0))
 	game.reset_player(rival, Vector2(23, 0))
 	game.cast(1, Rules.MOVE, rival.p)
+	check(game.effects.back().vfx == Rules.Vfx.TACKLE_LAUNCH, "tackle marks its launch effect")
+	var tagged_tackle_hit := false
 	for step in range(24):
 		game.advance(1.0 / 60.0)
+		if not game.effects.is_empty() and game.effects.back().vfx == Rules.Vfx.TACKLE_HIT:
+			tagged_tackle_hit = true
+	check(tagged_tackle_hit, "tackle marks its contact effect")
 	var fast_damage: float = 100.0 - rival.hp
 	game.reset_player(pilot, Vector2(-85, 0))
 	game.reset_player(rival, Vector2(85, 0))
@@ -279,6 +287,11 @@ func test_loadouts() -> void:
 	pilot.choices[Rules.F] = 1
 	game.cast(1, Rules.F, Vector2.ZERO)
 	check(pilot.hp == 100.0, "repair respects max health")
+	var remote := game.snapshot().duplicate(true)
+	Motion.apply(Motion.encode(game), remote)
+	check(remote.effects.back().vfx == Rules.Vfx.REPAIR and remote.effects.back().value == 8,
+		"repair shows the actual restored health to clients")
+	check(remote.players[1].propulsion > 0.0, "recovery trail state reaches clients")
 	pilot.choices[Rules.Q] = 2
 	game.finish_round(1)
 	var before_purchase: int = pilot.gold
@@ -332,6 +345,14 @@ func test_projectile_tactics() -> void:
 	game.advance(1.0 / 60.0)
 	check(game.shots.size() == 1 and game.shots[0].v.y < 0.0 and is_equal_approx(game.shots[0].v.length(), 384.0),
 		"gravity bends the projectile toward the impact point at the same speed")
+	var packet := Motion.encode(game)
+	var replica := game.snapshot().duplicate(true)
+	Motion.apply(packet, replica)
+	check(replica.effects.back().vfx == Rules.Vfx.GRAVITY, "gravity collapse style survives motion encoding")
+	var visual_bytes: int = replica.players.size() * Motion.PLAYER_VFX_BYTES + replica.shots.size() + replica.strikes.size()
+	Motion.apply(packet.slice(0, packet.size() - visual_bytes - replica.effects.size() * 2), replica)
+	check(replica.effects.back().cue == Rules.Cue.STRIKE and not replica.effects.back().has("vfx"),
+		"motion packets without effect styles retain their original cues")
 
 
 func test_equipment() -> void:
@@ -491,14 +512,17 @@ func test_repel() -> void:
 	game.advance(Rules.SHOP_TIME)
 	game.advance(3.0)
 	game.players[1].p = Vector2.ZERO
-	game.players[2].p = Vector2(148.0, 0)
+	game.players[2].p = Vector2(135.0, 0)
 	game.players[3].p = Vector2(0, 105.0)
 	game.cast(1, Rules.E, Vector2.RIGHT)
 	game.players[1].p = Vector2(60.0, 0)
-	game.advance(0.14)
+	game.advance(0.16)
+	check(game.strikes.is_empty() and game.players[1].windup > 0.0 and game.players[2].hp == 100.0,
+		"repel is still preparing at the previous release time")
+	game.advance(Rules.REPEL_WINDUP - 0.16)
 	check(game.strikes.size() == 1 and game.strikes[0].p == game.players[1].p and game.players[2].hp == 100.0,
 		"repel spawns its telegraph at the moved caster")
-	game.advance(0.02)
+	game.advance(Rules.REPEL_RELEASE_DELAY)
 	check(game.players[2].hp < 100.0 and game.players[2].kick.x > 0.0
 		and game.players[1].hp == 100.0 and game.players[3].hp == 100.0,
 		"repel pushes nearby enemies from the new center and misses distant targets")

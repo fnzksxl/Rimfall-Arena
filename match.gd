@@ -118,6 +118,7 @@ func reset_player(player: Dictionary, spawn: Vector2) -> void:
 		"move": Vector2.ZERO, "aim": -spawn.normalized(), "input_at": -1.0,
 		"hp": 100.0, "impact": 0.0, "alive": true, "kills": 0, "damage": 0,
 		"guard": 0.0, "charge": 0.0, "flash": 0.0, "reflect": 0.0,
+		"propulsion": 0.0,
 		"gear_time": 0.0, "gear_used": false, "shield_used": false, "last_hit": 0, "last_hit_at": -99.0,
 		"anchor_left": 0.0, "anchor_pos": Vector2.ZERO, "step_left": 0.0,
 		"surge_wait": 0.0, "surge_left": 0.0, "windup": 0.0, "windup_aim": Vector2.RIGHT,
@@ -273,6 +274,19 @@ static func mirror_offset(player: Dictionary, mirror_index: int) -> Vector2:
 	return axis.rotated(-1.05 if mirror_index == 0 else 2.18) * (59.0 if mirror_index == 0 else 74.0)
 
 
+static func cast_aim_point(origin: Vector2, offset: Vector2, skill_id: String) -> Vector2:
+	match skill_id:
+		"mark":
+			return origin + offset.limit_length(330.0)
+		"scatter":
+			return origin + offset.limit_length(250.0)
+		"repeater":
+			return (origin + offset.limit_length(235.0)).clamp(-MAP_EDGE, MAP_EDGE)
+		"gravity":
+			return origin + offset.limit_length(300.0)
+	return origin + offset
+
+
 func cast(id: int, slot: int, target: Vector2) -> void:
 	if phase != FIGHT or not players.has(id) or slot < 0 or slot >= Rules.ACTIVE_SLOTS or not target.is_finite():
 		return
@@ -289,29 +303,23 @@ func cast(id: int, slot: int, target: Vector2) -> void:
 	if recast_window(player, slot) > 0.0:
 		if slot == Rules.F:
 			player.anchor_left = 0.0
-			effect(player.p, tint, 31.0, 0.28)
+			effect(player.p, tint, 31.0, 0.28, 0, -1, Vector2.ZERO, Rules.Vfx.ANCHOR_RETURN)
 			player.p = player.anchor_pos
 			player.kick = Vector2.ZERO
+			player.propulsion = 0.0
 			player.walk = Vector2.ZERO
+			effect(player.p, tint, 40.0, 0.32, 0, -1, Vector2.ZERO, Rules.Vfx.ANCHOR_RETURN)
 		else:
 			player.step_left = 0.0
 			player.kick = direction * (505.0 + (level - 1) * 65.0)
 			player.kick_decay = Rules.PROPULSION_DECAY
-		effect(player.p, tint, 40.0, 0.32)
+			player.propulsion = 0.28
+			effect(player.p, tint, 40.0, 0.28, 0, -1, direction, Rules.Vfx.DOUBLE_RECAST)
 		return
 	player.cooldowns[slot] = Rules.cooldown(slot, choice, level)
 	var delay := Rules.cast_delay(slot, choice)
-	var aim_point: Vector2 = player.p + offset
+	var aim_point := cast_aim_point(player.p, offset, Rules.skill(slot, choice).id)
 	if delay > 0.0:
-		match Rules.skill(slot, choice).id:
-			"mark":
-				aim_point = player.p + offset.limit_length(330.0)
-			"scatter":
-				aim_point = player.p + offset.limit_length(250.0)
-			"repeater":
-				aim_point = (player.p + offset.limit_length(235.0)).clamp(-MAP_EDGE, MAP_EDGE)
-			"gravity":
-				aim_point = player.p + offset.limit_length(300.0)
 		player.windup = delay
 		player.windup_slot = slot
 		player.windup_aim = direction
@@ -333,77 +341,88 @@ func release_cast(id: int, slot: int, direction: Vector2, target: Vector2) -> vo
 	var player: Dictionary = players[id]
 	var level: int = player.levels[slot]
 	var skill := Rules.skill(slot, player.choices[slot])
+	var vfx: int = Rules.SKILL_VFX.get(skill.id, Rules.Vfx.NONE)
 	var tint: Color = Rules.SLOTS[slot].color
 	if slot <= Rules.R:
 		serial += 1
 		player.merge({"fire_id": serial, "fire_at": elapsed, "fire_aim": direction}, true)
 		var cue: int = [Rules.Cue.FIRE, Rules.Cue.POWER, Rules.Cue.MARK, Rules.Cue.POWER][slot]
-		effect(player.p + direction * 21.0, tint, 27.0, 0.19, 0, cue)
+		var cast_vfx := Rules.Vfx.MUZZLE if vfx != Rules.Vfx.NONE and vfx != Rules.Vfx.GRAVITY else Rules.Vfx.NONE
+		effect(player.p + direction * 21.0, tint, 27.0, 0.19, 0, cue, direction, cast_vfx)
 	match skill.id:
 		"pulse", "wave", "lance", "heavy", "recoil", "disc", "curve", "seeker", \
 		"ricochet", "snare", "link", "swap", "jam":
-			shoot(id, slot, direction, player.p + direction * 20.0, skill.shot, level)
+			shoot(id, slot, direction, player.p + direction * 20.0, skill.shot, level, vfx)
 			if skill.id == "recoil":
 				player.kick = player.kick * 0.5 - direction * 410.0
 				player.kick_decay = Rules.PROPULSION_DECAY
+				effect(player.p, tint, 31.0, 0.24, 0, -1, -direction, vfx)
 		"mark":
-			add_strike(id, slot, target, 46.0, 0.70 - Rules.AREA_WINDUP, 24, 505.0, level)
+			add_strike(id, slot, target, Rules.AREA_RADII.mark, 0.70 - Rules.AREA_WINDUP, 24, 505.0, level, vfx)
 		"repel":
-			add_strike(id, slot, player.p, Rules.REPEL_RADIUS, 0.16 - Rules.AREA_WINDUP, 16, 525.0, level, false, true)
+			add_strike(id, slot, player.p, Rules.AREA_RADII.repel, Rules.REPEL_RELEASE_DELAY, 14, 420.0, level, vfx, true)
 		"fissure":
 			for index in range(3):
-				var pos: Vector2 = player.p + direction * (85.0 + index * 85.0)
-				add_strike(id, slot, pos, 29.0, 0.42 - Rules.AREA_WINDUP + index * 0.16, 12, 325.0, level)
+				var pos: Vector2 = player.p + direction * Rules.FISSURE_STEP * (index + 1)
+				add_strike(id, slot, pos, Rules.AREA_RADII.fissure, 0.42 - Rules.AREA_WINDUP + index * 0.16, 12, 325.0, level, vfx)
 		"scatter":
 			var delay := 0.74 - Rules.AREA_WINDUP
 			strikes.append({"owner": id, "slot": slot, "p": target,
-				"left": delay, "duration": delay, "size": 30.0, "pull": false,
-				"scatter": true, "angle": direction.angle(), "skill": skill, "level": level})
+				"left": delay, "duration": delay, "size": Rules.AREA_RADII.scatter, "pull": false,
+				"scatter": true, "angle": direction.angle(), "skill": skill, "level": level, "vfx": vfx})
 		"repeater":
 			var delay := 0.58 - Rules.AREA_WINDUP
 			strikes.append({"owner": id, "slot": slot, "p": target, "left": delay, "duration": delay,
-				"size": 23.0, "pull": false, "repeats": 3, "angle": direction.angle(), "skill": skill, "level": level})
+				"size": Rules.AREA_RADII.repeater, "pull": false, "repeats": 3, "angle": direction.angle(),
+				"skill": skill, "level": level, "vfx": vfx})
 		"gravity":
-			add_strike(id, slot, target, 64.0, 0.85, 27, 685.0, level, true)
+			add_strike(id, slot, target, Rules.AREA_RADII.gravity, 0.85, 27, 685.0, level, vfx)
 		"windup":
-			shoot(id, slot, direction, player.p + direction * 20.0, skill.shot, level)
+			shoot(id, slot, direction, player.p + direction * 20.0, skill.shot, level, vfx)
 			player.kick = player.kick * 0.65 - direction * 255.0
 			player.kick_decay = Rules.PROPULSION_DECAY
 		"guard":
 			player.guard = 0.85 + (level - 1) * 0.25
-			effect(player.p, tint, 40.0, 0.30)
+			effect(player.p, tint, 40.0, 0.30, 0, -1, Vector2.ZERO, vfx)
 		"repair":
+			var old_hp: float = player.hp
 			player.hp = minf(100.0, player.hp + 16.0 + (level - 1) * 5.0)
-			effect(player.p, Color("#adf097"), 46.0, 0.47)
+			effect(player.p, Color("#adf097"), 46.0, 0.47, 0, -1, Vector2.ZERO, vfx, ceili(player.hp - old_hp))
 		"cleanse":
 			player.impact = maxf(0.0, player.impact - 32.0 - (level - 1) * 10.0)
 			player.kick *= 0.28
-			effect(player.p, tint, 56.0, 0.38)
+			effect(player.p, Color("#ffb473"), 56.0, 0.38, 0, -1, Vector2.ZERO, vfx)
 		"reflect":
 			player.reflect = 0.9 + (level - 1) * 0.25
-			effect(player.p, tint, 35.0, 0.22)
+			effect(player.p, tint, 35.0, 0.22, 0, -1, Vector2.ZERO, vfx)
 		"anchor":
 			player.anchor_pos = player.p
 			player.anchor_left = 2.0 + (level - 1) * 0.20
-			effect(player.p, tint, 34.0, 0.27)
+			effect(player.p, tint, 34.0, 0.27, 0, -1, Vector2.ZERO, vfx)
 		"surge":
 			player.surge_wait = 2.3
-			effect(player.p, tint, 37.0, 0.30)
+			effect(player.p, tint, 37.0, 0.30, 0, -1, Vector2.ZERO, vfx)
 		"mirror":
 			player.mirror = 2.10 + (level - 1) * 0.18
 			player.mirror_mask = 3
 			player.mirror_axis = direction
+			effect(player.p, tint, 25.0, 0.22, 0, -1, Vector2.ZERO, vfx)
+			for index in range(2):
+				var copy: Vector2 = player.p + mirror_offset(player, index)
+				if Rules.square_extent(copy) <= Rules.MAP_HALF_SIDE:
+					effect(copy, tint, 25.0, 0.22, 0, -1, Vector2.ZERO, vfx)
 		"cloak":
 			player.cloak = 2.0 + (level - 1) * 0.22
 			player.mirror_mask = 0
 			player.link_target = 0
 			player.windup = 0.0
-			effect(player.p, tint, 31.0, 0.25)
+			effect(player.p, tint, 31.0, 0.25, 0, -1, Vector2.ZERO, vfx)
 		"double":
 			player.step_left = 0.90
 			player.kick = player.kick * 0.18 + direction * (505.0 + (level - 1) * 65.0)
 			player.kick_decay = Rules.PROPULSION_DECAY
-			effect(player.p, tint, 38.0, 0.26)
+			player.propulsion = 0.24
+			effect(player.p, tint, 38.0, 0.26, 0, -1, player.kick.normalized(), vfx)
 		"dash", "recover", "tackle":
 			var speed := 700.0 if skill.id == "dash" else 825.0
 			if skill.id == "recover":
@@ -414,14 +433,21 @@ func release_cast(id: int, slot: int, direction: Vector2, target: Vector2) -> vo
 				if not pos.is_equal_approx(destination):
 					direction = pos.direction_to(destination)
 				speed = 930.0 if outside else 540.0
+				if outside:
+					vfx = Rules.Vfx.RECOVER_OUTSIDE
 			elif skill.id == "tackle":
 				player.charge = 0.37
 			player.kick = player.kick * 0.24 + direction * (speed + (level - 1) * 75.0)
 			player.kick_decay = Rules.PROPULSION_DECAY
-			effect(player.p, tint, 45.0, 0.32)
+			if skill.id == "tackle":
+				effect(player.p, tint, 45.0, 0.20, 0, -1, player.kick.normalized(), vfx)
+			else:
+				player.propulsion = 0.39 if vfx == Rules.Vfx.RECOVER_OUTSIDE else 0.30
+				effect(player.p, tint, 45.0, 0.32, 0, -1, player.kick.normalized(), vfx)
 
 
-func shoot(id: int, slot: int, direction: Vector2, origin: Vector2, profile: Dictionary, level: int) -> void:
+func shoot(id: int, slot: int, direction: Vector2, origin: Vector2, profile: Dictionary, level: int,
+		vfx := Rules.Vfx.NONE) -> void:
 	serial += 1
 	var shooter: Dictionary = players.get(id, {})
 	var speed_factor := Rules.PROJECTILE_SPEED_SCALE * Rules.equipment_factor(shooter, "shot_speed")
@@ -432,18 +458,21 @@ func shoot(id: int, slot: int, direction: Vector2, origin: Vector2, profile: Dic
 		"force": 0.0 if profile.force == 0.0 else profile.force + (level - 1) * 38.0, "slot": slot, "style": profile.style,
 		"curve": profile.get("curve", 0.0), "seeks": profile.get("seeks", false),
 		"proc": profile.get("proc", Rules.NO_PROC), "level": level, "bounces": 2,
-		"pierce": profile.get("pierce", false), "turn_at": profile.get("turn_distance", 0.0) / speed, "hit": []})
+		"pierce": profile.get("pierce", false), "turn_at": profile.get("turn_distance", 0.0) / speed,
+		"hit": [], "vfx": vfx, "visual_step": int(vfx == Rules.Vfx.CURVE)})
 
 
 func add_strike(id: int, slot: int, pos: Vector2, size: float, delay: float,
-	damage: int, force: float, level: int, pull := false, follow_owner := false) -> void:
-	strikes.append({"owner": id, "slot": slot, "p": pos, "left": delay, "duration": delay, "pull": pull,
+	damage: int, force: float, level: int, vfx := Rules.Vfx.NONE, follow_owner := false) -> void:
+	strikes.append({"owner": id, "slot": slot, "p": pos, "left": delay, "duration": delay,
+		"pull": vfx == Rules.Vfx.GRAVITY, "vfx": vfx,
 		"follow_owner": follow_owner,
 		"size": size + (level - 1) * 5.0, "damage": Rules.attack_damage(damage + (level - 1) * 4),
 		"force": force + (level - 1) * 35.0})
 
 
-func hit(owner: int, victim: int, damage: int, force: float, direction: Vector2, interrupt := true) -> void:
+func hit(owner: int, victim: int, damage: int, force: float, direction: Vector2, interrupt := true,
+		vfx := Rules.Vfx.NONE) -> void:
 	if not opponents(owner, victim):
 		return
 	var player: Dictionary = players[victim]
@@ -461,13 +490,16 @@ func hit(owner: int, victim: int, damage: int, force: float, direction: Vector2,
 	player.cloak = 0.0
 	if interrupt:
 		player.charge = 0.0
+		player.propulsion = 0.0
 		if player.windup_slot == Rules.R and Rules.skill(Rules.R, player.choices[Rules.R]).id == "windup":
+			effect(player.p + player.windup_aim * 21.0, Rules.SLOTS[Rules.R].color, 25.0, 0.23,
+				0, -1, player.windup_aim, Rules.Vfx.WINDUP_BREAK)
 			player.windup = 0.0
 			player.windup_slot = -1
 	if player.surge_wait > 0.0:
 		player.surge_wait = 0.0
 		player.surge_left = 1.45 + (player.levels[Rules.F] - 1) * 0.24
-		effect(player.p, Rules.SLOTS[Rules.F].color, 48.0, 0.40)
+		effect(player.p, Rules.SLOTS[Rules.F].color, 48.0, 0.40, 0, -1, Vector2.ZERO, Rules.Vfx.SURGE_ACTIVE)
 	var resistance: float = protection * (0.30 if player.guard > 0.0 else 1.0) * Rules.equipment_factor(player, "knockback")
 	if force > 0.0:
 		var speed := force * Rules.knockback_multiplier(player.impact) * resistance * Rules.KNOCKBACK_SPEED_SCALE
@@ -480,7 +512,7 @@ func hit(owner: int, victim: int, damage: int, force: float, direction: Vector2,
 		attacker.damage += ceili(health_lost)
 		if attacker.alive:
 			attacker.hp = minf(100.0, attacker.hp + health_lost * Rules.equipment_amount(attacker, "lifesteal"))
-	effect(player.p, Rules.COLORS[player.color], 36.0, 0.24, ceili(health_lost), Rules.Cue.HIT)
+	effect(player.p, Rules.COLORS[player.color], 36.0, 0.24, ceili(health_lost), Rules.Cue.HIT, direction, vfx)
 	if player.hp <= 0.0:
 		eliminate(victim, "격파")
 
@@ -505,13 +537,15 @@ func push_feed(message: String) -> void:
 		feed.pop_back()
 
 
-func effect(pos: Vector2, tint: Color, size: float, duration: float, damage := 0, cue := -1) -> void:
+func effect(pos: Vector2, tint: Color, size: float, duration: float, damage := 0, cue := -1,
+		direction := Vector2.ZERO, vfx := Rules.Vfx.NONE, value := 0) -> void:
 	if effects.size() >= 16:
 		effects.pop_front()
 	if cue >= 0:
 		audio_serial += 1
 	effects.append({"p": pos, "color": tint, "size": size, "left": duration,
-		"duration": duration, "damage": damage, "cue": cue, "audio_id": audio_serial})
+		"duration": duration, "damage": damage, "cue": cue, "audio_id": audio_serial,
+		"direction": direction, "vfx": vfx, "value": value})
 
 
 func advance(delta: float) -> void:
@@ -546,6 +580,7 @@ func step_fight(delta: float) -> void:
 		previous_positions[id] = player.p
 		player.guard = maxf(0.0, player.guard - delta)
 		player.reflect = maxf(0.0, player.reflect - delta)
+		player.propulsion = maxf(0.0, player.propulsion - delta)
 		player.flash = maxf(0.0, player.flash - delta)
 		player.anchor_left = maxf(0.0, player.anchor_left - delta)
 		player.step_left = maxf(0.0, player.step_left - delta)
@@ -613,7 +648,7 @@ func contact_time(offset: Vector2, travel: Vector2, reach: float) -> float:
 	return (-approach - sqrt(discriminant)) / speed_squared
 
 
-func map_exit_time(origin: Vector2, travel: Vector2) -> float:
+static func map_exit_time(origin: Vector2, travel: Vector2) -> float:
 	var x_time := INF if travel.x == 0.0 else (signf(travel.x) * Rules.MAP_HALF_SIDE - origin.x) / travel.x
 	var y_time := INF if travel.y == 0.0 else (signf(travel.y) * Rules.MAP_HALF_SIDE - origin.y) / travel.y
 	return minf(x_time, y_time)
@@ -625,18 +660,20 @@ func resolve_projectiles(delta: float, previous_positions: Dictionary) -> void:
 	var exit_times: Array[float] = []
 	for shot: Dictionary in shots:
 		if shot.curve != 0.0:
-			shot.v = shot.v.rotated(-shot.curve * clampf(1.35 - shot.age, 0.0, delta))
+			shot.v = shot.v.rotated(-shot.curve * clampf(Rules.CURVE_TIME - shot.age, 0.0, delta))
+			shot.visual_step = int(shot.age + delta < Rules.CURVE_TIME)
 		if shot.seeks:
-			var steer_time := minf(shot.age + delta, 1.70) - maxf(shot.age, 0.22)
-			if steer_time > 0.0:
-				steer_projectile(shot, steer_time)
+			var steer_time := minf(shot.age + delta, 1.38) - maxf(shot.age, 0.22)
+			shot.visual_step = int(steer_time > 0.0 and steer_projectile(shot, steer_time))
 		if shot.turn_at > 0.0 and shot.age >= shot.turn_at:
 			shot.turn_at = 0.0
 			shot.v = -shot.v
 			shot.damage = maxi(1, roundi(shot.damage * 0.55))
 			shot.force *= 0.65
 			shot.hit.clear()
-			effect(shot.p, Rules.SLOTS[shot.slot].color, 19.0, 0.21)
+			shot.visual_step = 1
+			effect(shot.p, Rules.SLOTS[shot.slot].color, 19.0, 0.21, 0, -1,
+				shot.v.normalized(), Rules.Vfx.DISC_TURN)
 		exit_times.append(map_exit_time(shot.p, shot.v * delta))
 	var contacts: Array[Dictionary] = []
 	for index in range(shots.size()):
@@ -686,7 +723,8 @@ func resolve_projectiles(delta: float, previous_positions: Dictionary) -> void:
 			var candidate := shots[other]
 			var contact_at: Vector2 = shot.p + shot.v * delta * contact.at
 			var other_at: Vector2 = candidate.p + candidate.v * delta * contact.at
-			effect(contact_at.lerp(other_at, 0.5), Color("#e8faf8"), 29.0, 0.24, 0, Rules.Cue.CLASH)
+			effect(contact_at.lerp(other_at, 0.5), Color("#e8faf8"), 29.0, 0.24, 0, Rules.Cue.CLASH,
+				other_at.direction_to(contact_at))
 			destroyed[index] = contact.at
 			destroyed[other] = contact.at
 		elif not destroyed.has(index) and players[contact.victim].alive:
@@ -695,7 +733,8 @@ func resolve_projectiles(delta: float, previous_positions: Dictionary) -> void:
 				var mask: int = 1 << contact.mirror
 				if target.mirror_mask & mask:
 					target.mirror_mask &= ~mask
-					effect(target.p + mirror_offset(target, contact.mirror), Rules.SLOTS[Rules.F].color, 26.0, 0.22, 0, Rules.Cue.DEFLECT)
+					effect(target.p + mirror_offset(target, contact.mirror), Rules.SLOTS[Rules.F].color,
+						26.0, 0.22, 0, Rules.Cue.DEFLECT, shot.v.normalized(), Rules.Vfx.MIRROR_BREAK)
 					if not shot.pierce:
 						destroyed[index] = contact.at
 				continue
@@ -704,7 +743,7 @@ func resolve_projectiles(delta: float, previous_positions: Dictionary) -> void:
 				continued.append(reflect_shot(shot, contact.victim, delta * contact.at))
 				destroyed[index] = contact.at
 			else:
-				hit(shot.owner, contact.victim, shot.damage, shot.force, shot.v.normalized())
+				hit(shot.owner, contact.victim, shot.damage, shot.force, shot.v.normalized(), true, shot.vfx)
 				if shot.proc == Rules.BOUNCE:
 					var next_shot := ricochet(shot, contact.victim, delta * contact.at)
 					if not next_shot.is_empty():
@@ -753,6 +792,8 @@ func ricochet(shot: Dictionary, victim: int, time: float) -> Dictionary:
 	shot.hit.append(victim)
 	shot.merge({"p": location, "v": chosen * shot.v.length(), "bounces": shot.bounces - 1,
 		"damage": maxi(1, roundi(shot.damage * 0.72)), "force": shot.force * 0.75}, true)
+	shot.visual_step = 2 - shot.bounces
+	effect(location, Rules.SLOTS[shot.slot].color, 24.0, 0.22, 0, -1, chosen, Rules.Vfx.BOUNCE_TURN)
 	return shot
 
 
@@ -764,8 +805,9 @@ func swap_positions(source: Dictionary, target: Dictionary) -> void:
 		player.walk = Vector2.ZERO
 		player.kick = Vector2.ZERO
 		player.charge = 0.0
+		player.propulsion = 0.0
 		player.cloak = 0.0
-		effect(player.p, Rules.SLOTS[Rules.R].color, 42.0, 0.32)
+		effect(player.p, Rules.SLOTS[Rules.R].color, 42.0, 0.32, 0, -1, Vector2.ZERO, Rules.Vfx.SWAP_PORTAL)
 
 
 func projectile_status(shot: Dictionary, target: Dictionary, victim: int) -> void:
@@ -792,19 +834,23 @@ func resolve_links() -> void:
 		var target: Dictionary = players.get(caster.link_target, {})
 		if not caster.alive or caster.cloak > 0.0 or not target.get("alive", false) or target.cloak > 0.0 or \
 			(caster.p as Vector2).distance_to(target.p) > Rules.LINK_RANGE:
+			if caster.alive and caster.cloak <= 0.0:
+				effect(caster.p, Rules.SLOTS[Rules.E].color, 23.0, 0.24, 0, -1, Vector2.ZERO, Rules.Vfx.LINK_END)
+			if target.get("alive", false) and target.cloak <= 0.0:
+				effect(target.p, Rules.SLOTS[Rules.E].color, 23.0, 0.24, 0, -1, Vector2.ZERO, Rules.Vfx.LINK_END)
 			caster.link_target = 0
 			continue
 		while caster.link_ticks > 0 and target.alive and elapsed >= caster.link_at:
-			hit(id, caster.link_target, caster.link_damage, 0.0, Vector2.ZERO, false)
+			hit(id, caster.link_target, caster.link_damage, 0.0, Vector2.ZERO, false, Rules.Vfx.LINK_TICK)
 			caster.link_at += Rules.LINK_INTERVAL
 			caster.link_ticks -= 1
 		if caster.link_ticks == 0 or not target.alive:
 			caster.link_target = 0
 
 
-func steer_projectile(shot: Dictionary, delta: float) -> void:
+func steer_projectile(shot: Dictionary, delta: float) -> bool:
 	var heading: Vector2 = shot.v.normalized()
-	var best_distance := 315.0 * 315.0
+	var best_distance := 250.0 * 250.0
 	var correction := 0.0
 	for id: int in players:
 		if not opponents(shot.owner, id) or not players[id].alive or players[id].cloak > 0.0:
@@ -812,22 +858,26 @@ func steer_projectile(shot: Dictionary, delta: float) -> void:
 		var offset: Vector2 = players[id].p - shot.p
 		var distance := offset.length_squared()
 		var angle := heading.angle_to(offset)
-		if distance < best_distance and absf(angle) < 0.85:
+		if distance < best_distance and absf(angle) < 0.70:
 			best_distance = distance
 			correction = angle
-	var turn := 1.40 * delta
+	var turn := 1.05 * delta
 	shot.v = shot.v.rotated(clampf(correction, -turn, turn))
+	return absf(correction) > 0.015
 
 
 func reflect_shot(shot: Dictionary, owner: int, time: float) -> Dictionary:
 	serial += 1
 	var location: Vector2 = shot.p + shot.v * time
-	effect(location, Rules.SLOTS[Rules.F].color, 39.0, 0.28, 0, Rules.Cue.DEFLECT)
+	effect(location, Rules.SLOTS[Rules.F].color, 39.0, 0.28, 0, Rules.Cue.DEFLECT,
+		-shot.v.normalized(), Rules.Vfx.REFLECT_HIT)
 	var reflected := shot.duplicate()
 	reflected.merge({"id": serial, "owner": owner, "p": location, "v": -shot.v,
 		"age": 0.0,
 		"damage": maxi(1, roundi(shot.damage * 0.60)), "force": shot.force * 0.65,
 		"pierce": false, "turn_at": 0.0, "curve": 0.0, "seeks": false, "proc": Rules.NO_PROC, "hit": []}, true)
+	if reflected.vfx in [Rules.Vfx.SEEKER, Rules.Vfx.CURVE]:
+		reflected.visual_step = 0
 	return reflected
 
 
@@ -846,8 +896,9 @@ func resolve_strikes(delta: float) -> void:
 		if strike.has("repeats"):
 			if players.get(strike.owner, {}).get("alive", false):
 				var aim := Vector2.from_angle(strike.angle)
-				shoot(strike.owner, strike.slot, aim, strike.p + aim * 16.0, strike.skill.shot, strike.level)
-				effect(strike.p, Rules.SLOTS[strike.slot].color, 28.0, 0.20, 0, Rules.Cue.FIRE)
+				shoot(strike.owner, strike.slot, aim, strike.p + aim * 16.0, strike.skill.shot, strike.level, strike.vfx)
+				effect(strike.p + aim * 16.0, Rules.SLOTS[strike.slot].color, 28.0, 0.20, 0, Rules.Cue.FIRE,
+					aim, Rules.Vfx.REPEATER_FIRE)
 				strike.repeats -= 1
 				if strike.repeats > 0:
 					strike.duration = Rules.REPEATER_INTERVAL
@@ -858,8 +909,9 @@ func resolve_strikes(delta: float) -> void:
 		if strike.get("scatter", false):
 			for spoke in range(4):
 				var aim := Vector2.from_angle(strike.angle + spoke * PI * 0.5)
-				shoot(strike.owner, strike.slot, aim, strike.p + aim * 13.0, strike.skill.shot, strike.level)
-			effect(strike.p, Rules.SLOTS[strike.slot].color, 43.0, 0.30, 0, Rules.Cue.STRIKE)
+				shoot(strike.owner, strike.slot, aim, strike.p + aim * 13.0, strike.skill.shot, strike.level, strike.vfx)
+			effect(strike.p, Rules.SLOTS[strike.slot].color, 43.0, 0.30, 0, Rules.Cue.STRIKE,
+				Vector2.from_angle(strike.angle), strike.vfx)
 			strikes.remove_at(index)
 			continue
 		if strike.pull:
@@ -880,7 +932,8 @@ func resolve_strikes(delta: float) -> void:
 				if strike.pull:
 					direction = -offset.normalized()
 				hit(strike.owner, id, strike.damage, strike.force, direction)
-		effect(strike.p, Rules.SLOTS[strike.slot].color, strike.size, 0.42, 0, Rules.Cue.STRIKE)
+		effect(strike.p, Rules.SLOTS[strike.slot].color, strike.size, 0.42, 0, Rules.Cue.STRIKE,
+			Vector2.ZERO, strike.vfx)
 		strikes.remove_at(index)
 
 
@@ -918,18 +971,20 @@ func resolve_charges(delta: float, previous_positions: Dictionary) -> void:
 				if away.is_zero_approx():
 					away = travel.normalized() if not travel.is_zero_approx() else Vector2.RIGHT
 				hits.append({"owner": id, "target": target, "direction": away,
-					"damage": Rules.attack_damage(8), "force": 240.0})
-				effect(contact, Rules.SLOTS[Rules.MOVE].color, 32.0, 0.24)
+					"damage": Rules.attack_damage(8), "force": 240.0, "vfx": Rules.Vfx.CLOAK_HIT})
 			else:
 				var strength := clampf(travel.length() / (delta * 720.0), 0.35, 1.0)
 				player.charge = 0.0
 				player.kick *= 0.44
 				hits.append({"owner": id, "target": target, "direction": travel.normalized(),
 					"damage": Rules.attack_damage(roundi((15 + (player.levels[Rules.MOVE] - 1) * 4) * strength)),
-					"force": 520.0 * strength})
+					"force": 520.0 * strength, "vfx": Rules.Vfx.TACKLE_HIT})
+		elif cloaked and player.cloak <= 0.0:
+			effect(player.p, Rules.SLOTS[Rules.MOVE].color, 26.0, 0.23, 0, -1, Vector2.ZERO, Rules.Vfx.CLOAK_REVEAL)
 	for contact: Dictionary in hits:
 		if players[contact.target].alive:
-			hit(contact.owner, contact.target, contact.damage, contact.force, contact.direction)
+			hit(contact.owner, contact.target, contact.damage, contact.force, contact.direction, true,
+				contact.get("vfx", Rules.Vfx.NONE))
 
 
 func finish_round(winner: int) -> void:

@@ -7,7 +7,11 @@ const TEAM_NAMES := ["블루 팀", "오렌지 팀"]
 const TEAM_COLORS := [Color("#8dbbff"), Color("#ffaf81")]
 const START_GOLD := 120
 const AREA_WINDUP := 0.14
-const REPEL_RADIUS := 84.0
+const REPEL_WINDUP := 0.33
+const REPEL_RELEASE_DELAY := 0.02
+const AREA_RADII := {"mark": 46.0, "repel": 68.0, "fissure": 29.0, "gravity": 64.0, "scatter": 30.0, "repeater": 23.0}
+const FISSURE_STEP := 85.0
+const CURVE_TIME := 1.35
 const SHOP_TIME := 25.0
 const HALF_SIDE := 700.0
 const FINAL_HALF_SIDE := 220.0
@@ -38,6 +42,30 @@ const COLORS := [Color("#79f2db"), Color("#ffa574"), Color("#93aaff"),
 enum { BASIC, Q, E, R, F, MOVE, GEAR }
 enum { BOLT, WAVE, ORB, DISC }
 enum Cue { FIRE, POWER, DASH, GUARD, MARK, HIT, START, RESULT, CLASH, DEFLECT, KNOCKOUT, STRIKE }
+enum Vfx {
+	NONE, GRAVITY, TACKLE_LAUNCH, TACKLE_HIT,
+	WAVE, LANCE, RICOCHET, DISC, CURVE, SEEKER, SNARE,
+	MARK, REPEL, FISSURE, SCATTER, LINK, REPEATER,
+	HEAVY, RECOIL, WINDUP, SWAP, JAM,
+	GUARD, REPAIR, CLEANSE, REFLECT, ANCHOR, SURGE, MIRROR,
+	DASH, RECOVER, DOUBLE, CLOAK,
+	DISC_TURN, BOUNCE_TURN, REPEATER_FIRE, WINDUP_BREAK, SWAP_PORTAL,
+	REFLECT_HIT, ANCHOR_RETURN, SURGE_ACTIVE, MIRROR_BREAK,
+	RECOVER_OUTSIDE, DOUBLE_RECAST, CLOAK_HIT, CLOAK_REVEAL, LINK_TICK, LINK_END,
+	MUZZLE,
+}
+const SKILL_VFX := {
+	"wave": Vfx.WAVE, "lance": Vfx.LANCE, "ricochet": Vfx.RICOCHET, "disc": Vfx.DISC,
+	"curve": Vfx.CURVE, "seeker": Vfx.SEEKER, "snare": Vfx.SNARE,
+	"mark": Vfx.MARK, "repel": Vfx.REPEL, "fissure": Vfx.FISSURE, "scatter": Vfx.SCATTER,
+	"link": Vfx.LINK, "repeater": Vfx.REPEATER,
+	"heavy": Vfx.HEAVY, "gravity": Vfx.GRAVITY, "recoil": Vfx.RECOIL, "windup": Vfx.WINDUP,
+	"swap": Vfx.SWAP, "jam": Vfx.JAM,
+	"guard": Vfx.GUARD, "repair": Vfx.REPAIR, "cleanse": Vfx.CLEANSE, "reflect": Vfx.REFLECT,
+	"anchor": Vfx.ANCHOR, "surge": Vfx.SURGE, "mirror": Vfx.MIRROR,
+	"dash": Vfx.DASH, "recover": Vfx.RECOVER, "tackle": Vfx.TACKLE_LAUNCH,
+	"double": Vfx.DOUBLE, "cloak": Vfx.CLOAK,
+}
 enum { NO_PROC, BOUNCE, ROOT, LINK, SWAP, JAM }
 const LINK_RANGE := 360.0
 const LINK_INTERVAL := 0.65
@@ -62,8 +90,8 @@ const SLOTS := [
 				"pierce": true, "turn_distance": 219.0}},
 		{"id": "curve", "name": "궤도 탄", "cd": 7.2, "help": "발사 방향에서 왼쪽으로\n휘어 날아가는 좁은 탄", "upgrade": "피해와 넉백 증가",
 			"shot": {"speed": 570.0, "size": 6.0, "damage": 14, "gain": 3, "force": 320.0, "style": BOLT, "curve": 1.18}},
-		{"id": "seeker", "name": "추적 신호탄", "cd": 8.6, "help": "전방의 가까운 상대를\n천천히 따라가는 탄", "upgrade": "피해와 넉백 증가",
-			"shot": {"speed": 485.0, "size": 5.0, "damage": 11, "gain": 3, "force": 265.0, "style": BOLT, "seeks": true}},
+		{"id": "seeker", "name": "추적 신호탄", "cd": 8.6, "help": "가까운 정면의 적을 잠깐\n따라간 뒤 직진하는 탄", "upgrade": "피해와 넉백 증가",
+			"shot": {"speed": 485.0, "size": 5.0, "damage": 11, "gain": 3, "force": 240.0, "style": BOLT, "seeks": true}},
 		{"id": "snare", "name": "구속탄", "cd": 8.6, "help": "맞은 상대의 이동과 Space를\n잠시 봉쇄. 넉백은 적용", "upgrade": "구속 지속 시간 증가",
 			"shot": {"speed": 535.0, "size": 7.0, "damage": 6, "gain": 0, "force": 105.0, "style": BOLT, "proc": ROOT}},
 	]},
@@ -127,6 +155,8 @@ static func shop_slot_open(round_no: int, slot: int) -> bool:
 	return round_no != 1 or slot in [Q, GEAR]
 
 static func cast_delay(slot: int, choice: int) -> float:
+	if slot == E and skill(slot, choice).id == "repel":
+		return REPEL_WINDUP
 	if slot == R and skill(slot, choice).id == "windup":
 		return 0.75
 	return [0.10, 0.14, AREA_WINDUP, 0.20, 0.0, 0.0][slot]

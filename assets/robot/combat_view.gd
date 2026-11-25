@@ -55,6 +55,9 @@ func update_pose(player: Dictionary, facing: Vector2, step: float, now: float, e
 		var duration := Rules.cast_delay(slot, player.choices[slot])
 		facing = player.windup_aim
 		robot.pose_attack(lerpf(0.0, 0.42, clampf(1.0 - player.windup / duration, 0.0, 1.0)), step / TAU, 0.0)
+	elif player.charge > 0.0:
+		robot.pose_walk(step / TAU, 0.40, 0.60)
+		robot.torso.rotation.x = 0.37
 	elif age < ATTACK_TIME:
 		facing = player.fire_aim
 		robot.pose_attack(lerpf(0.42, 1.0, age / ATTACK_TIME), step / TAU, stride)
