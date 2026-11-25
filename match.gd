@@ -702,8 +702,8 @@ func resolve_projectiles(delta: float, previous_positions: Dictionary) -> void:
 		if shot.turn_at > 0.0 and shot.age >= shot.turn_at:
 			shot.turn_at = 0.0
 			shot.v = -shot.v
-			shot.damage = maxi(1, roundi(shot.damage * 0.55))
-			shot.force *= 0.65
+			shot.damage = maxi(1, roundi(shot.damage * Rules.DISC_RETURN_DAMAGE_SCALE))
+			shot.force *= Rules.DISC_RETURN_FORCE_SCALE
 			shot.hit.clear()
 			shot.visual_step = 1
 			effect(shot.p, Rules.SLOTS[shot.slot].color, 19.0, 0.21, 0, -1,
@@ -716,7 +716,7 @@ func resolve_projectiles(delta: float, previous_positions: Dictionary) -> void:
 		var travel: Vector2 = shot.v * delta
 		for other in range(index + 1, shots.size()):
 			var candidate := shots[other]
-			if shot.owner != candidate.owner and not opponents(shot.owner, candidate.owner):
+			if not opponents(shot.owner, candidate.owner):
 				continue
 			var at := contact_time(origin - candidate.p, travel - candidate.v * delta, shot.size + candidate.size)
 			if at <= minf(1.0, minf(exit_times[index], exit_times[other])):

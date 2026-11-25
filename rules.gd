@@ -77,6 +77,8 @@ const LINK_RANGE := 360.0
 const LINK_INTERVAL := 0.65
 const REPEATER_FIRST_SHOT := 0.40
 const REPEATER_INTERVAL := 0.32
+const DISC_RETURN_DAMAGE_SCALE := 0.80
+const DISC_RETURN_FORCE_SCALE := 0.85
 const SEEKER_GUIDANCE := {"start": 0.22, "end": 1.38, "distance": 250.0, "cone": 0.70, "rate": 1.05}
 const REPEATER_GUIDANCE := {"start": 0.10, "end": 0.48, "distance": 180.0, "cone": 0.32, "rate": 0.38}
 const ACTIVE_SLOTS := GEAR
@@ -94,8 +96,8 @@ const SLOTS := [
 			"shot": {"speed": 775.0, "size": 6.0, "damage": 16, "gain": 4, "force": 345.0, "style": BOLT, "pierce": true}},
 		{"id": "ricochet", "name": "연쇄 도탄", "cd": 8.0, "help": "맞힌 뒤 주변 새 상대에게\n약해진 탄이 최대 두 번 튐", "upgrade": "피해와 넉백 증가",
 			"shot": {"speed": 565.0, "size": 7.0, "damage": 13, "gain": 3, "force": 280.0, "style": ORB, "proc": BOUNCE}},
-		{"id": "disc", "name": "회수 디스크", "cd": 8.0, "help": "좁은 궤도로 왕복\n돌아올 때 피해 감소", "upgrade": "피해와 넉백 증가",
-			"shot": {"speed": 540.0, "size": 7.0, "damage": 13, "gain": 3, "force": 285.0, "style": DISC,
+		{"id": "disc", "name": "회수 디스크", "cd": 8.0, "help": "적을 관통하며 왕복\n돌아올 때도 피해의 80% 유지", "upgrade": "피해와 넉백 증가",
+			"shot": {"speed": 540.0, "size": 9.0, "damage": 13, "gain": 3, "force": 285.0, "style": DISC,
 				"pierce": true, "turn_distance": 219.0}},
 		{"id": "curve", "name": "궤도 탄", "cd": 7.2, "help": "왼쪽으로 휘어 날아가는\n굵은 투사체", "upgrade": "피해와 넉백 증가",
 			"shot": {"speed": 570.0, "size": 10.0, "damage": 14, "gain": 3, "force": 320.0, "style": BOLT, "curve": 1.18}},

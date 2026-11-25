@@ -6,7 +6,7 @@ const Arena = preload("res://arena.gd")
 const Hud = preload("res://hud.gd")
 const Sounds = preload("res://sounds.gd")
 const Motion = preload("res://motion.gd")
-const VERSION := 32
+const VERSION := 33
 const CAST_KEYS := [KEY_Q, KEY_E, KEY_R, KEY_F, KEY_SPACE]
 const CONTROLS_PATH := "user://controls.cfg"
 enum { MENU, CONNECTING, ROOM }

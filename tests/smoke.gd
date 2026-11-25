@@ -348,8 +348,10 @@ func test_projectile_tactics() -> void:
 	for frame in range(82):
 		game.advance(1.0 / 60.0)
 		rival.kick = Vector2.ZERO
-	check(rival.hp == 88.0 and game.shots.size() == 1 and game.shots[0].v.x < 0.0,
-		"disc hits once on each pass and continues with reduced damage")
+	check(rival.hp == 86.0 and game.shots.size() == 1 and game.shots[0].v.x < 0.0,
+		"disc hits for 8 damage outward and 6 damage on return")
+	check(game.shots.size() == 1 and game.shots[0].size == 9.0 and is_equal_approx(game.shots[0].force, 242.25),
+		"the wider return disc retains 85 percent of its base knockback")
 	game.shots.clear()
 	game.reset_player(pilot, Vector2(-85, 0))
 	game.reset_player(rival, Vector2(85, 0))
@@ -443,6 +445,10 @@ func test_new_skill_variants() -> void:
 	cast_immediately(game, 1, Rules.Q, Vector2.RIGHT * 100.0)
 	check(game.shots.size() == 2 and game.shots[0].v.y < 0.0 and game.shots[1].v.y > 0.0,
 		"twin shot fans out to both sides")
+	for step in range(6):
+		game.advance(1.0 / 60.0)
+	check(game.shots.size() == 2 and game.shots[0].p.x > 40.0 and game.shots[1].p.x > 40.0,
+		"same-owner projectiles survive their overlapping spawn and travel onward")
 	game.shots.clear()
 	cast_immediately(game, 1, Rules.E, Vector2.RIGHT * 100.0)
 	var strike_points := game.strikes.map(func(strike: Dictionary): return strike.p)
