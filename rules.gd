@@ -131,8 +131,8 @@ const SLOTS := [
 			"shot": {"speed": 660.0, "size": 9.0, "damage": 70, "gain": 8, "force": 590.0, "style": BOLT}},
 		{"id": "swap", "name": "교대 탄", "cd": 11.5, "help": "탄이 상대를 맞히면\n서로 위치를 바꾸고 관성 제거", "upgrade": "명중 피해 증가",
 			"shot": {"speed": 490.0, "size": 7.0, "damage": 5, "gain": 2, "force": 0.0, "style": DISC, "proc": SWAP}},
-		{"id": "jam", "name": "회로 교란탄", "cd": 10.8, "help": "맞은 상대의 스킬을 잠시 봉쇄\n이동과 기본 공격은 가능", "upgrade": "교란 지속 시간 증가",
-			"shot": {"speed": 545.0, "size": 7.0, "damage": 9, "gain": 0, "force": 165.0, "style": BOLT, "proc": JAM}},
+		{"id": "jam", "name": "회로 교란탄", "cd": 10.8, "help": "굵은 고속탄으로 적의 스킬 봉쇄\n이동과 기본 공격은 가능", "upgrade": "피해와 교란 지속 시간 증가",
+			"shot": {"speed": 680.0, "size": 11.0, "damage": 24, "gain": 4, "force": 165.0, "style": BOLT, "proc": JAM}},
 		{"id": "impact_burst", "name": "충격 기폭", "cd": 11.8, "help": "조준 지점에 지연 폭발\n충격이 높은 적에게 최대 18 추가 피해", "upgrade": "기본 피해와 폭발 반경 증가"},
 	]},
 	{"key": "F", "name": "유틸리티", "color": Color("#f7dc72"), "price": 105, "options": [

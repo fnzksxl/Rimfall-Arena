@@ -687,9 +687,22 @@ func test_tactical_casts() -> void:
 	game.reset_player(pilot, Vector2(-130, 0))
 	game.reset_player(rival, Vector2(100, 0))
 	cast_immediately(game, 2, Rules.R, pilot.p)
+	check(game.shots.size() == 1 and game.shots[0].size == 11.0
+		and is_equal_approx(game.shots[0].v.length(), 680.0 * Rules.PROJECTILE_SPEED_SCALE),
+		"the buffed circuit disruptor projectile is wider and faster")
 	game.advance(0.75)
-	check(pilot.jam > 0.0 and not Match.can_cast(pilot, Rules.F) and Match.can_cast(pilot, Rules.BASIC),
+	check(pilot.hp == 86.0 and is_equal_approx(pilot.jam, 1.90)
+		and not Match.can_cast(pilot, Rules.F) and Match.can_cast(pilot, Rules.BASIC),
 		"jam blocks skill slots and keeps the basic attack available")
+	game.reset_player(pilot, Vector2(-130, 0))
+	game.reset_player(rival, Vector2(100, 0))
+	rival.levels[Rules.R] = 3
+	cast_immediately(game, 2, Rules.R, pilot.p)
+	game.advance(0.75)
+	var remote := game.snapshot().duplicate(true)
+	Motion.apply(Motion.encode(game), remote)
+	check(pilot.hp == 81.0 and is_equal_approx(remote.players[1].jam, 2.40),
+		"max-level circuit disruptor damage and duration fit the motion packet")
 
 	game.reset_player(pilot, Vector2(-145, 0))
 	game.reset_player(rival, Vector2(95, 0))

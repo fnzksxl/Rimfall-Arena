@@ -850,7 +850,7 @@ func projectile_status(shot: Dictionary, target: Dictionary, victim: int) -> voi
 			target.root = maxf(target.root, 0.95 + (shot.level - 1) * 0.16)
 			target.walk = Vector2.ZERO
 		Rules.JAM:
-			target.jam = maxf(target.jam, 1.15 + (shot.level - 1) * 0.15)
+			target.jam = maxf(target.jam, 1.90 + (shot.level - 1) * 0.25)
 		Rules.LINK:
 			var caster: Dictionary = players.get(shot.owner, {})
 			if caster.get("alive", false) and caster.cloak <= 0.0 and (caster.p as Vector2).distance_to(target.p) <= Rules.LINK_RANGE:
