@@ -2,7 +2,7 @@ extends SubViewport
 
 const Robot = preload("res://assets/robot/robot.gd")
 const Rules = preload("res://rules.gd")
-const MODEL_SIZE := 49.0
+const MODEL_SIZE := 60.0
 const ATTACK_TIME := 0.44
 const MUZZLE_TIME := 0.16
 const LOOKS := [Robot.Look.ULTRON, Robot.Look.IRON_MAN, Robot.Look.VISION, Robot.Look.SPIDER_MAN,
@@ -18,25 +18,31 @@ var variant := 0
 
 
 func _ready() -> void:
-	size = Vector2i(96, 96)
+	size = Vector2i(128, 128)
 	own_world_3d = true
 	transparent_bg = true
 	render_target_update_mode = SubViewport.UPDATE_WHEN_VISIBLE
-	camera.position = Vector3(0.0, 3.7, 2.65)
+	camera.position = Vector3(0.0, 5.46, 2.80)
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = 2.55
+	camera.size = 2.48
 	var environment := Environment.new()
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color("#c8e0f3")
-	environment.ambient_light_energy = 0.85
+	environment.ambient_light_color = Color("#bdcfdf")
+	environment.ambient_light_energy = 0.81
 	camera.environment = environment
 	add_child(camera)
-	camera.look_at(Vector3(0.0, 0.93, 0.0))
+	camera.look_at(Vector3(0.0, 0.92, 0.0))
 	camera.current = true
 	var key := DirectionalLight3D.new()
-	key.rotation_degrees = Vector3(-58, -32, 0)
-	key.light_energy = 1.16
+	key.rotation_degrees = Vector3(-49, -32, 0)
+	key.light_color = Color("#fff1df")
+	key.light_energy = 1.40
 	add_child(key)
+	var rim := DirectionalLight3D.new()
+	rim.rotation_degrees = Vector3(-23, 147, 0)
+	rim.light_color = Color("#96d6ff")
+	rim.light_energy = 0.75
+	add_child(rim)
 	robot.look = LOOKS[variant]
 	robot.autoplay = false
 	add_child(robot)

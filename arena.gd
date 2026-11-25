@@ -28,6 +28,7 @@ var last_epoch := -1
 var followed_id := 0
 var camera_focus := Vector2.ZERO
 var backdrop := Node2D.new()
+var deck_tiles: Array[Texture2D] = []
 var pulse_texture: Texture2D
 var gravity_texture: Texture2D
 var glow_texture: GradientTexture2D
@@ -35,6 +36,7 @@ var skill_effects: SkillEffects
 
 
 func _ready() -> void:
+	deck_tiles = make_deck_tiles()
 	add_child(backdrop)
 	backdrop.show_behind_parent = true
 	backdrop.draw.connect(draw_backdrop)
@@ -189,57 +191,142 @@ func square(half_side: float) -> Rect2:
 
 func draw_backdrop() -> void:
 	var half := Rules.HALF_SIDE
-	var footprint := square(half)
+	var extent := Rules.MAP_HALF_SIDE
 	var scatter := RandomNumberGenerator.new()
 	scatter.seed = 39
-	for index in range(240):
-		var extent := Rules.MAP_HALF_SIDE
+	backdrop.draw_rect(square(extent), Color("#080f17"))
+	for index in range(168):
 		var point := Vector2(scatter.randf_range(-extent, extent), scatter.randf_range(-extent, extent))
-		if Rules.square_extent(point) > half + 30.0:
-			backdrop.draw_circle(point, 1.2 + (index % 3) * 0.5, Color("#31505f"), true, -1.0, true)
-	backdrop.draw_rect(square(Rules.MAP_HALF_SIDE), Color("#526c78"), false, 3.0, true)
-	backdrop.draw_rect(square(half + 28.0).grow_individual(0, 0, 0, 18), Color("#040b12"))
-	backdrop.draw_rect(square(half + 28.0), Color("#203642"))
-	backdrop.draw_rect(square(half + 22.0), Color("#122530"))
-	backdrop.draw_rect(footprint, Color("#192f39"))
-	var sector := Vector2.ONE * half
-	backdrop.draw_rect(Rect2(-sector, sector), Color("#1b333f"))
-	backdrop.draw_rect(Rect2(Vector2.ZERO, sector), Color("#1b333f"))
-	for offset in range(-600, 601, 100):
-		var grid_color := Color("#36515b") if offset % 300 == 0 else Color("#29434f")
-		backdrop.draw_line(Vector2(offset, -half), Vector2(offset, half), grid_color, 1.0, true)
-		backdrop.draw_line(Vector2(-half, offset), Vector2(half, offset), grid_color, 1.0, true)
-	for offset in range(-650, 651, 50):
-		var tint := AMBER.darkened(0.12) if offset % 100 == 0 else Color("#466271")
-		for side_sign: float in [-1.0, 1.0]:
-			var outer := (half + 22.0) * side_sign
-			var inner := (half + 13.0) * side_sign
-			backdrop.draw_line(Vector2(offset, inner), Vector2(offset, outer), tint, 2.0, true)
-			backdrop.draw_line(Vector2(inner, offset), Vector2(outer, offset), tint, 2.0, true)
-	for x in [-1.0, 1.0]:
-		for y in [-1.0, 1.0]:
-			var corner := Vector2(x, y) * (half + 15.0)
-			backdrop.draw_polyline(PackedVector2Array([corner - Vector2(x * 32, 0), corner,
-				corner - Vector2(0, y * 32)]), MINT.darkened(0.30), 3.0, true)
-	backdrop.draw_circle(Vector2.ZERO, 29, Color("#10222c"), true, -1.0, true)
-	backdrop.draw_circle(Vector2.ZERO, 28, Color("#4d727a"), false, 1.0, true)
-	backdrop.draw_line(Vector2(-18, 0), Vector2(18, 0), MINT.darkened(0.40), 1.5, true)
-	backdrop.draw_line(Vector2(0, -18), Vector2(0, 18), MINT.darkened(0.40), 1.5, true)
+		if Rules.square_extent(point) > half + 45.0:
+			backdrop.draw_circle(point, 0.8 + (index % 3) * 0.35, Color("#263a48"), true, -1.0, true)
+	backdrop.draw_rect(square(extent), Color("#334650"), false, 2.0, true)
+	backdrop.draw_rect(square(half + 31.0).grow_individual(4, 2, 6, 17), Color("#04080d"))
+	backdrop.draw_rect(square(half + 31.0), Color("#263541"))
+	backdrop.draw_rect(square(half + 26.0), Color("#101923"))
+	backdrop.draw_rect(square(half + 12.0), Color("#384850"))
+	backdrop.draw_rect(square(half), Color("#101923"))
+
+	var panels := maxi(1, roundi(half * 2.0 / 100.0))
+	var span := half * 2.0 / panels
+	for row in range(panels):
+		for column in range(panels):
+			var index := (row * 7 + column * 13 + row * column) % deck_tiles.size()
+			var point := Vector2(column * span - half, row * span - half)
+			backdrop.draw_texture_rect(deck_tiles[index], Rect2(point, Vector2.ONE * span), false)
+
+	for wall in range(4):
+		var outward := Vector2.from_angle(wall * PI * 0.5)
+		var along := outward.orthogonal()
+		for bay: float in [-0.78, -0.31, 0.31, 0.78]:
+			var point := outward * (half + 19.0) + along * (half * bay)
+			backdrop.draw_line(point - along * 24.0, point + along * 24.0, Color("#0a1018"), 11.0, true)
+			for notch in range(-2, 3):
+				var slat := point + along * notch * 8.3
+				backdrop.draw_line(slat - outward * 3.5, slat + outward * 3.5 + along * 3.0,
+					Color("#a67d52") if notch in [-2, 2] else Color("#3d505a"), 2.1, true)
+		for side: float in [-1.0, 1.0]:
+			var led := outward * (half + 9.0) + along * side * (half - 38.0)
+			backdrop.draw_line(led - along * 20.0, led + along * 20.0, Color("#44777d"), 3.0, true)
+		for band in [0.33, 0.66]:
+			var a: Vector2 = outward * (half * float(band) - 20.0)
+			var b: Vector2 = a + outward * 42.0
+			backdrop.draw_line(a, b, Color("#1a2a34"), 11.0, true)
+			backdrop.draw_line(a, b, Color("#4a6570"), 1.3, true)
+		draw_deck_drain(outward * (half * 0.74) + along * (half * 0.42), outward)
+	draw_deck_hatch()
+
+
+func make_deck_tiles() -> Array[Texture2D]:
+	const RESOLUTION := 128
+	var tiles: Array[Texture2D] = []
+	var noise := FastNoiseLite.new()
+	noise.seed = 4307
+	noise.frequency = 0.082
+	var grain := RandomNumberGenerator.new()
+	grain.seed = 175
+	for variant in range(5):
+		var tile := Image.create_empty(RESOLUTION, RESOLUTION, false, Image.FORMAT_RGBA8)
+		var steel := Color("#26363f").lerp(Color("#2a3b45"), variant / 4.0)
+		for y in range(RESOLUTION):
+			for x in range(RESOLUTION):
+				var inset_x := mini(x, RESOLUTION - 1 - x)
+				var inset_y := mini(y, RESOLUTION - 1 - y)
+				var edge := mini(inset_x, inset_y)
+				if edge < 1 or inset_x + inset_y < 5:
+					tile.set_pixel(x, y, Color("#1b2730"))
+					continue
+				var brushing := grain.randf_range(-0.017, 0.017)
+				var weathering := noise.get_noise_2d(x * 0.32 + variant * 137.0, y * 1.12) * 0.082
+				var slope := 0.027 - y / float(RESOLUTION) * 0.065
+				var shade := steel * (1.0 + weathering + brushing + slope)
+				shade.a = 1.0
+				if edge < 3 or inset_x + inset_y < 8:
+					shade = shade.lightened(0.062) if x + y < RESOLUTION else shade.darkened(0.12)
+				tile.set_pixel(x, y, shade)
+		for point in [Vector2i(6, 13), Vector2i(121, 13), Vector2i(6, 114), Vector2i(121, 114)]:
+			tile.set_pixelv(point, Color("#101923"))
+			tile.set_pixelv(point + Vector2i(1, 0), Color("#101923"))
+			tile.set_pixelv(point + Vector2i(0, 1), Color("#405056"))
+		for scuff in range(6):
+			var x := grain.randi_range(13, 102)
+			var y := grain.randi_range(15, 113)
+			for length in range(grain.randi_range(3, 18)):
+				var point := Vector2i(x + length, y + floori(length / 6.0))
+				tile.set_pixelv(point, tile.get_pixelv(point).lightened(0.032))
+		tiles.append(ImageTexture.create_from_image(tile))
+	return tiles
+
+
+func draw_deck_hatch() -> void:
+	for index in range(4):
+		var ray := Vector2.from_angle(index * PI * 0.5)
+		for offset: float in [-5.5, 5.5]:
+			var inset := ray.orthogonal() * offset
+			backdrop.draw_line(ray * 79.0 + inset, ray * 123.0 + inset, Color("#1c2a33"), 3.5, true)
+			backdrop.draw_line(ray * 83.0 + inset, ray * 118.0 + inset, Color("#415862"), 1.0, true)
+	var hatch := PackedVector2Array([
+		Vector2(-53, -35), Vector2(-35, -53), Vector2(35, -53), Vector2(53, -35),
+		Vector2(53, 35), Vector2(35, 53), Vector2(-35, 53), Vector2(-53, 35)])
+	backdrop.draw_colored_polygon(hatch, Color("#202f39"))
+	hatch.append(hatch[0])
+	backdrop.draw_polyline(hatch, Color("#101a22"), 4.0, true)
+	backdrop.draw_polyline(hatch, Color("#415360"), 1.5, true)
+	for side: float in [-1.0, 1.0]:
+		var port := Vector2(36.0 * side, 0.0)
+		backdrop.draw_line(port - Vector2(0, 16), port + Vector2(0, 16), Color("#476970"), 3.0, true)
+		for slit in range(-2, 3):
+			var center := Vector2(slit * 11.0, side * 25.0)
+			backdrop.draw_line(center - Vector2(3, 0), center + Vector2(3, 0), Color("#101c25"), 5.0, true)
+	backdrop.draw_line(Vector2(0, -17), Vector2(0, 17), Color("#0d1921"), 3.0, true)
+
+
+func draw_deck_drain(point: Vector2, direction: Vector2) -> void:
+	var along := direction.orthogonal()
+	backdrop.draw_line(point - along * 27.0, point + along * 27.0, Color("#41535e"), 16.0, true)
+	backdrop.draw_line(point - along * 25.0, point + along * 25.0, Color("#19262f"), 12.0, true)
+	for index in range(-3, 4):
+		var vent := point + along * index * 6.2
+		backdrop.draw_line(vent - direction * 3.5, vent + direction * 3.5, Color("#33434d"), 2.2, true)
 
 
 func draw_boundary(half_side: float) -> void:
 	var outer := Rules.HALF_SIDE
 	var boundary := AMBER if half_side < outer - 2.0 else MINT
 	if half_side < outer:
-		var tint := Color(0.84, 0.21, 0.12, 0.17)
+		var tint := Color(0.79, 0.21, 0.12, 0.15)
 		var width := outer - half_side
 		draw_rect(Rect2(-outer, -outer, outer * 2.0, width), tint)
 		draw_rect(Rect2(-outer, half_side, outer * 2.0, width), tint)
 		draw_rect(Rect2(-outer, -half_side, width, half_side * 2.0), tint)
 		draw_rect(Rect2(half_side, -half_side, width, half_side * 2.0), tint)
-	draw_rect(square(half_side), Color(boundary, 0.10), false, 10.0)
-	draw_rect(square(half_side), Color(boundary, 0.24), false, 4.0)
-	draw_rect(square(half_side), boundary, false, 1.7)
+	draw_rect(square(half_side), Color(boundary, 0.12), false, 10.0)
+	draw_rect(square(half_side), Color(boundary, 0.29), false, 4.0)
+	draw_rect(square(half_side), Color(boundary, 0.96), false, 1.7)
+	for x: float in [-1.0, 1.0]:
+		for y: float in [-1.0, 1.0]:
+			var corner := Vector2(x, y) * half_side
+			draw_polyline(PackedVector2Array([corner - Vector2(x * 26.0, 0.0), corner,
+				corner - Vector2(0.0, y * 26.0)]), boundary.lightened(0.40), 3.5, true)
 
 
 func _draw() -> void:
@@ -683,6 +770,8 @@ func draw_impact(fx: Dictionary, progress: float, clash: bool) -> void:
 func draw_fighter(point: Vector2, facing: Vector2, tint: Color, guard: float, flash: float,
 		walk := Vector2.ZERO, step := 0.0, view: CombatView = null, opacity := 1.0) -> void:
 	if view != null:
+		draw_texture_rect(glow_texture, Rect2(point + Vector2(-22, 4), Vector2(44, 24)),
+			false, Color("#030810", 0.76 * opacity))
 		var size := Vector2.ONE * CombatView.MODEL_SIZE
 		var modulation := Color.WHITE.lerp(Color("#ffa7a4"), 0.55) if flash > 0.0 else Color.WHITE
 		draw_texture_rect(view.get_texture(), Rect2(point - size * 0.5, size), false, Color(modulation, opacity))

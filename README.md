@@ -4,7 +4,7 @@
 
 ## 친구들과 플레이
 
-1. 각 PC에서 같은 Windows 빌드인 `RimfallArena-v0.16.0.exe`를 실행합니다. 에디터 설치 없이 이 파일 하나로 실행할 수 있습니다.
+1. 각 PC에서 같은 Windows 빌드인 `RimfallArena-v0.16.1.exe`를 실행합니다. 에디터 설치 없이 이 파일 하나로 실행할 수 있습니다.
 2. 방장은 닉네임과 **개인전 / 팀전**을 선택한 뒤 방 만들기 버튼을 누릅니다. 기본 포트는 **UDP 7410**입니다.
 3. 방장은 대기실 목록에서 친구가 접속할 수 있는 네트워크 주소를 선택하고 **주소 복사**를 눌러 공유합니다. 참가자는 그 주소를 호스트 IP 칸에 붙여넣고 **방 참가**를 누릅니다. `주소:포트`를 붙여넣으면 입력된 포트도 자동으로 적용됩니다.
 4. 팀전 참가자는 자동으로 두 팀에 배정되며 대기실 버튼으로 팀을 옮길 수 있습니다. 팀당 최대 3명이고 양 팀이 모두 참가하며 인원 차이가 1명 이하일 때 시작할 수 있습니다.
@@ -107,7 +107,7 @@ Godot 4.7.2에서 `project.godot`을 가져와 F5로 실행합니다. 아래 명
 ```powershell
 godot --headless --path . --import
 godot --headless --path . --script res://tests/smoke.gd
-godot --headless --path . --export-release "Windows Desktop" build/RimfallArena-v0.16.0.exe
+godot --headless --path . --export-release "Windows Desktop" build/RimfallArena-v0.16.1.exe
 ```
 
 스모크 테스트는 상점·넉백·장외 규칙과 로컬 UDP를 통한 5라운드 플레이 흐름을 검증합니다. 저장된 빌드가 없는 상태에서 내보내려면 먼저 `build` 폴더를 생성합니다.

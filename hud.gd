@@ -335,11 +335,11 @@ func build_character_picker() -> void:
 			var preview := CombatView.new()
 			preview.variant = choice
 			card.add_child(preview)
-			preview.size = Vector2i(192, 192)
-			preview.camera.position = Vector3(2.0, 1.75, 3.8)
+			preview.size = Vector2i(224, 224)
+			preview.camera.position = Vector3(2.07, 1.97, 3.88)
 			preview.camera.look_at(Vector3(0, 0.94, 0))
-			preview.camera.size = 2.15
-			preview.robot.pose_walk(0.0, 0.0, 0.0)
+			preview.camera.size = 2.18
+			preview.robot.pose_attack([0.36, 0.39, 0.34, 0.39, 0.38, 0.40][choice], 0.0, 0.0)
 			var portrait := TextureRect.new()
 			portrait.texture = preview.get_texture()
 			portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE

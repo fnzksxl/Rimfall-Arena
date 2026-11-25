@@ -2,6 +2,15 @@ extends Node3D
 
 const LEG_LENGTH := 0.49
 const STANCE := 0.60
+const CHEST_WIDTH := [0.56, 0.64, 0.59, 0.51, 0.47, 0.73, 0.54]
+const SHOULDER_SPREAD := [0.32, 0.36, 0.34, 0.32, 0.285, 0.42, 0.34]
+const SHOULDER_WIDTH := [0.22, 0.32, 0.24, 0.18, 0.17, 0.33, 0.24]
+const SHELL_OUTLINE := [
+	Vector2(0.34, 0.50), Vector2(-0.34, 0.50), Vector2(-0.50, 0.34), Vector2(-0.50, -0.34),
+	Vector2(-0.34, -0.50), Vector2(0.34, -0.50), Vector2(0.50, -0.34), Vector2(0.50, 0.34),
+]
+const SHELL_HEIGHTS := [-0.50, -0.32, 0.29, 0.50]
+const SHELL_WIDTHS := [0.80, 1.0, 1.0, 0.71]
 
 enum Look { ROBOT, ULTRON, IRON_MAN, VISION, SPIDER_MAN, WAR_MACHINE, BLACK_PANTHER }
 
@@ -22,127 +31,129 @@ var cannon: Node3D
 var cannon_tip: Node3D
 var time := 0.0
 
-var armor := material(Color("#424e59"), 0.65)
-var frame := material(Color("#1b232e"), 0.42)
+static var shell_mesh: ArrayMesh
+
+var armor := material(Color("#607383"), 0.36)
+var frame := material(Color("#202937"), 0.24)
 var accent := material(Color("#63d8ba"), 0.32)
-var visor := material(Color("#ff514b"), 0.0, true)
+var visor := material(Color("#f5696d"), 0.0, true)
 
 
 func _ready() -> void:
 	match look:
 		Look.ULTRON:
-			armor = material(Color("#a2a7af"), 0.72)
-			accent = material(Color("#783039"), 0.4)
+			armor = material(Color("#a7b9c6"), 0.53)
+			accent = material(Color("#a54b54"), 0.34)
 		Look.IRON_MAN:
-			armor = material(Color("#9a1725"), 0.58)
-			frame = material(Color("#541820"), 0.4)
-			accent = material(Color("#dca74d"), 0.52)
-			visor = material(Color("#9cecff"), 0.0, true)
+			armor = material(Color("#bc414c"), 0.38)
+			frame = material(Color("#402834"), 0.27)
+			accent = material(Color("#dcb168"), 0.43)
+			visor = material(Color("#95e5ff"), 0.0, true)
 		Look.VISION:
-			armor = material(Color("#397d68"), 0.32)
-			frame = material(Color("#204c47"), 0.28)
-			accent = material(Color("#d8b258"), 0.35)
-			visor = material(Color("#edf5df"), 0.0, true)
+			armor = material(Color("#59a68e"), 0.36)
+			frame = material(Color("#21383b"), 0.26)
+			accent = material(Color("#c7b77d"), 0.39)
+			visor = material(Color("#d5ffe2"), 0.0, true)
 		Look.SPIDER_MAN:
-			armor = material(Color("#b82232"), 0.12)
-			frame = material(Color("#122c53"), 0.12)
-			accent = frame
+			armor = material(Color("#c34350"), 0.26)
+			frame = material(Color("#27364d"), 0.24)
+			accent = material(Color("#527cc0"), 0.39)
 			visor = material(Color("#eef6ff"), 0.0, true)
 		Look.WAR_MACHINE:
-			armor = material(Color("#555b65"), 0.70)
-			frame = material(Color("#222732"), 0.50)
-			accent = material(Color("#8c969b"), 0.63)
+			armor = material(Color("#798594"), 0.52)
+			frame = material(Color("#212832"), 0.36)
+			accent = material(Color("#b78358"), 0.39)
+			visor = material(Color("#ffad67"), 0.0, true)
 		Look.BLACK_PANTHER:
-			armor = material(Color("#292438"), 0.24)
-			frame = material(Color("#171421"), 0.14)
-			accent = material(Color("#a89dbb"), 0.65)
-			visor = material(Color("#c79dff"), 0.0, true)
+			armor = material(Color("#4c4969"), 0.40)
+			frame = material(Color("#232335"), 0.23)
+			accent = material(Color("#a29ac5"), 0.48)
+			visor = material(Color("#cda8ff"), 0.0, true)
 	pelvis = joint(self, Vector3(0, 1.03, 0))
-	part(pelvis, Vector3.ZERO, Vector3(0.37, 0.21, 0.23), frame)
+	shell(pelvis, Vector3.ZERO, Vector3(0.39, 0.19, 0.28), frame)
+	shell(pelvis, Vector3(0, -0.037, 0.10), Vector3(0.24, 0.14, 0.14), armor)
 	torso = joint(pelvis, Vector3(0, 0.13, 0))
-	part(torso, Vector3(0, 0.13, 0), Vector3(0.28, 0.28, 0.20), frame)
-	part(torso, Vector3(0, 0.32, 0.02), Vector3(0.46, 0.29, 0.27), armor)
-	part(torso, Vector3(0, 0.48, 0), Vector3(0.12, 0.13, 0.12), frame)
-	head = joint(torso, Vector3(0, 0.65, 0.018))
-	build_face_and_chest(head)
+	var chest_width: float = CHEST_WIDTH[look]
+	shell(torso, Vector3(0, 0.14, -0.027), Vector3(chest_width * 0.62, 0.29, 0.27), frame)
+	shell(torso, Vector3(0, 0.34, 0.02), Vector3(chest_width, 0.33, 0.39), armor)
+	shell(torso, Vector3(0, 0.47, -0.014), Vector3(chest_width * 0.57, 0.13, 0.29), frame)
+	head = joint(torso, Vector3(0, 0.631, 0.025))
+	build_helmet()
+	build_body_armor(chest_width)
 	for side: float in [-1.0, 1.0]:
 		build_limbs(side)
 	pose_walk(0.0)
 
 
-func build_face_and_chest(head: Node3D) -> void:
-	part(head, Vector3.ZERO, Vector3(0.27, 0.29, 0.24), armor)
-	match look:
-		Look.IRON_MAN, Look.WAR_MACHINE:
-			part(head, Vector3(0, -0.005, 0.12), Vector3(0.215, 0.23, 0.061), accent)
-			part(head, Vector3(0, -0.071, 0.153), Vector3(0.11, 0.013, 0.009), frame)
-			var core := MeshInstance3D.new()
-			var disk := CylinderMesh.new()
-			disk.top_radius = 0.048
-			disk.bottom_radius = 0.048
-			disk.height = 0.023
-			core.mesh = disk
-			core.material_override = visor
-			torso.add_child(core)
-			core.position = Vector3(0, 0.31, 0.165)
-			core.rotation.x = PI / 2.0
-			if look == Look.WAR_MACHINE:
-				cannon = joint(torso, Vector3(0.22, 0.46, -0.055))
-				part(cannon, Vector3(0, 0, 0.09), Vector3(0.107, 0.109, 0.26), frame)
-				part(cannon, Vector3(0, 0, 0.237), Vector3(0.072, 0.072, 0.085), accent)
-				cannon_tip = joint(cannon, Vector3(0, 0, 0.282))
-		Look.VISION:
-			var burgundy := material(Color("#9b3957"), 0.21)
-			part(head, Vector3(0, -0.017, 0.116), Vector3(0.226, 0.248, 0.051), burgundy)
-			var gem := part(head, Vector3(0, 0.089, 0.145), Vector3(0.046, 0.046, 0.022), accent)
-			gem.rotation.z = PI / 4.0
-			for side: float in [-1.0, 1.0]:
-				part(torso, Vector3(side * 0.14, 0.36, 0.158), Vector3(0.047, 0.114, 0.023), accent)
-		Look.SPIDER_MAN:
-			part(head, Vector3(0, 0, 0.126), Vector3(0.008, 0.27, 0.008), frame)
-			for row: float in [-0.078, 0.089]:
-				part(head, Vector3(0, row, 0.126), Vector3(0.25, 0.008, 0.008), frame)
-			part(torso, Vector3(0, 0.31, 0.164), Vector3(0.038, 0.082, 0.018), frame)
-			for side: float in [-1.0, 1.0]:
-				for row: float in [-1.0, 1.0]:
-					var leg := part(torso, Vector3(side * 0.035, 0.31 + row * 0.025, 0.165),
-						Vector3(0.058, 0.012, 0.018), frame)
-					leg.rotation.z = side * row * 0.62
-		Look.BLACK_PANTHER:
-			part(head, Vector3(0, -0.067, 0.119), Vector3(0.195, 0.115, 0.047), frame)
-			for side: float in [-1.0, 1.0]:
-				var ear := part(head, Vector3(side * 0.099, 0.146, -0.025),
-					Vector3(0.053, 0.101, 0.069), armor)
-				ear.rotation.z = -side * 0.25
-			for index in range(-2, 3):
-				var tooth := part(torso, Vector3(index * 0.064, 0.405 + absf(index) * 0.024, 0.16),
-					Vector3(0.029, 0.052, 0.015), accent)
-				tooth.rotation.z = index * 0.17
-		_:
-			part(head, Vector3(0, -0.069, 0.116), Vector3(0.18, 0.12, 0.075), frame)
-			part(torso, Vector3(0, 0.29, 0.157), Vector3(0.17, 0.065, 0.023), accent)
-			if look == Look.ULTRON:
-				part(head, Vector3(0, -0.078, 0.156), Vector3(0.15, 0.027, 0.009), visor)
+func build_helmet() -> void:
+	var helmet_width := 0.32 if look == Look.WAR_MACHINE else 0.27
+	shell(head, Vector3.ZERO, Vector3(helmet_width, 0.28, 0.30), armor)
+	shell(head, Vector3(0, -0.058, 0.137), Vector3(helmet_width * 0.74, 0.12, 0.079), frame)
+	shell(head, Vector3(0, 0.038, 0.139), Vector3(helmet_width * 0.92, 0.083, 0.064), frame)
+	shell(head, Vector3(0, 0.123, -0.024), Vector3(helmet_width * 0.333, 0.046, 0.19), accent)
 	for side: float in [-1.0, 1.0]:
-		var eye_size := Vector3(0.101, 0.029, 0.027)
-		var eye_z := 0.145
-		var tilt := 0.18
-		if look in [Look.IRON_MAN, Look.WAR_MACHINE]:
-			eye_z = 0.158
-			tilt = 0.06
-		elif look == Look.VISION:
-			eye_size = Vector3(0.063, 0.017, 0.022)
-		elif look == Look.BLACK_PANTHER:
-			eye_size = Vector3(0.083, 0.021, 0.018)
-			tilt = 0.31
-		elif look == Look.SPIDER_MAN:
-			eye_size = Vector3(0.075, 0.082, 0.025)
-			tilt = 0.29
-			var outline := part(head, Vector3(side * 0.067, 0.025, 0.127),
-				eye_size + Vector3(0.024, 0.024, 0), frame)
-			outline.rotation.z = side * tilt
-		var eye := part(head, Vector3(side * 0.063, 0.025, eye_z), eye_size, visor)
-		eye.rotation.z = side * tilt
+		var lens := shell(head, Vector3(side * helmet_width * 0.208, 0.04, 0.17),
+			Vector3(helmet_width * 0.39, 0.042 if look == Look.SPIDER_MAN else 0.030, 0.022), visor)
+		lens.rotation.z = side * (0.12 if look == Look.WAR_MACHINE else 0.26)
+		var cheek := shell(head, Vector3(side * helmet_width * 0.43, -0.039, 0.073),
+			Vector3(0.058, 0.13, 0.17), accent)
+		cheek.rotation.z = -side * 0.20
+		if look in [Look.VISION, Look.BLACK_PANTHER]:
+			var antenna := shell(head, Vector3(side * 0.088, 0.138, -0.078),
+				Vector3(0.042, 0.105, 0.096), frame if look == Look.BLACK_PANTHER else accent)
+			antenna.rotation.z = -side * 0.28
+
+
+func build_body_armor(width: float) -> void:
+	shell(torso, Vector3(0, 0.35, -0.211), Vector3(width * 0.58, 0.33, 0.175), frame)
+	shell(torso, Vector3(0, 0.32, 0.205), Vector3(0.13, 0.162, 0.065), frame)
+	match look:
+		Look.ULTRON, Look.WAR_MACHINE:
+			for row in range(2):
+				part(torso, Vector3(0, 0.318 + row * 0.041, 0.243), Vector3(0.088, 0.018, 0.020), visor)
+		Look.VISION, Look.BLACK_PANTHER:
+			shell(torso, Vector3(0, 0.335, 0.238), Vector3(0.045, 0.14, 0.023), visor)
+		_:
+			shell(torso, Vector3(0, 0.34, 0.238), Vector3(0.084, 0.083, 0.023), visor).rotation.z = PI * 0.25
+	for side: float in [-1.0, 1.0]:
+		var chest := shell(torso, Vector3(side * width * 0.249, 0.365, 0.173),
+			Vector3(width * 0.39, 0.17, 0.111), accent if look in [Look.IRON_MAN, Look.VISION] else armor)
+		chest.rotation.z = -side * 0.21
+		shell(torso, Vector3(side * width * 0.205, 0.18, 0.137), Vector3(0.065, 0.045, 0.045), accent)
+		shell(torso, Vector3(side * width * 0.155, 0.39, -0.296), Vector3(0.06, 0.15, 0.029), accent)
+		shell(torso, Vector3(side * width * 0.155, 0.425, -0.315), Vector3(0.022, 0.075, 0.013), visor)
+		match look:
+			Look.IRON_MAN:
+				var pod := shell(torso, Vector3(side * 0.215, 0.43, -0.232),
+					Vector3(0.14, 0.39, 0.23), accent)
+				pod.rotation.z = -side * 0.23
+				shell(pod, Vector3(0, -0.43, 0), Vector3(0.75, 0.23, 0.67), frame)
+			Look.VISION:
+				var fin := shell(torso, Vector3(side * 0.25, 0.483, -0.215),
+					Vector3(0.095, 0.54, 0.22), accent)
+				fin.rotation = Vector3(-0.42, 0, -side * 0.80)
+			Look.SPIDER_MAN:
+				var spar := shell(torso, Vector3(side * 0.245, 0.478, -0.193),
+					Vector3(0.12, 0.34, 0.16), accent)
+				spar.rotation = Vector3(-0.62, 0, -side * 0.55)
+				var tip := shell(torso, Vector3(side * 0.366, 0.578, -0.30),
+					Vector3(0.072, 0.26, 0.16), accent)
+				tip.rotation.z = -side * 1.04
+			Look.BLACK_PANTHER:
+				var fin := shell(torso, Vector3(side * 0.29, 0.49, -0.115),
+					Vector3(0.075, 0.32, 0.24), frame)
+				fin.rotation = Vector3(-0.58, 0, -side * 0.52)
+				part(torso, Vector3(side * 0.298, 0.52, -0.228),
+					Vector3(0.036, 0.047, 0.045), visor)
+	if look == Look.WAR_MACHINE:
+		cannon = joint(torso, Vector3(0.394, 0.635, -0.055))
+		shell(cannon, Vector3(0, -0.071, -0.04), Vector3(0.20, 0.23, 0.32), frame)
+		shell(cannon, Vector3(0, 0.020, 0.03), Vector3(0.22, 0.18, 0.38), armor)
+		shell(cannon, Vector3(0, 0.025, 0.215), Vector3(0.154, 0.135, 0.32), frame)
+		shell(cannon, Vector3(0, 0.025, 0.394), Vector3(0.14, 0.122, 0.092), accent)
+		for side: float in [-1.0, 1.0]:
+			part(cannon, Vector3(side * 0.038, 0.029, 0.443), Vector3(0.024, 0.049, 0.008), visor)
+		cannon_tip = joint(cannon, Vector3(0, 0.027, 0.451))
 
 
 func _process(delta: float) -> void:
@@ -155,34 +166,47 @@ func _process(delta: float) -> void:
 
 
 func build_limbs(side: float) -> void:
-	var hip := joint(pelvis, Vector3(side * 0.122, 0, 0))
+	var hip := joint(pelvis, Vector3(side * 0.133, 0, 0))
 	var knee := joint(hip, Vector3(0, -LEG_LENGTH, 0))
 	var ankle := joint(knee, Vector3(0, -LEG_LENGTH, 0))
 	hips.append(hip)
 	knees.append(knee)
 	ankles.append(ankle)
-	part(hip, Vector3(0, -0.21, 0), Vector3(0.16, 0.42, 0.16), armor)
-	part(knee, Vector3.ZERO, Vector3(0.16, 0.12, 0.17), frame)
-	part(knee, Vector3(0, -0.19, 0.014), Vector3(0.145, 0.33, 0.15), armor)
-	part(knee, Vector3(0, -0.414, 0), Vector3(0.086, 0.17, 0.085), frame)
-	part(knee, Vector3(0, -0.23, 0.095), Vector3(0.06, 0.15, 0.022), accent)
-	part(ankle, Vector3(0, -0.039, 0.042), Vector3(0.155, 0.095, 0.255), frame)
-	part(ankle, Vector3(0, -0.013, 0.112), Vector3(0.148, 0.046, 0.104), armor)
+	var shin_width := 0.204 if look == Look.WAR_MACHINE else 0.171
+	shell(hip, Vector3(0.011 * side, -0.192, 0.018), Vector3(0.185, 0.39, 0.20), armor)
+	shell(hip, Vector3(side * 0.063, -0.095, -0.004), Vector3(0.10, 0.19, 0.17), frame)
+	shell(knee, Vector3(0, 0, 0.021), Vector3(0.169, 0.14, 0.186), frame)
+	shell(knee, Vector3(0, -0.176, 0.043), Vector3(shin_width, 0.35, 0.198), armor)
+	shell(knee, Vector3(0, -0.397, -0.015), Vector3(0.099, 0.194, 0.107), frame)
+	shell(knee, Vector3(0, -0.195, 0.140), Vector3(shin_width * 0.47, 0.183, 0.043), accent)
+	part(knee, Vector3(0, -0.124, 0.163), Vector3(0.04, 0.032, 0.012), visor)
+	shell(ankle, Vector3(0, -0.042, 0.057), Vector3(shin_width * 1.05, 0.12, 0.287), frame)
+	shell(ankle, Vector3(0, -0.010, 0.115), Vector3(shin_width * 0.94, 0.080, 0.155), armor)
 
-	var shoulder := joint(torso, Vector3(side * 0.285, 0.37, 0))
+	var shoulder := joint(torso, Vector3(side * SHOULDER_SPREAD[look], 0.368, 0.006))
+	shoulder.rotation.z = side * 0.115
 	var elbow := joint(shoulder, Vector3(0, -0.29, 0))
 	shoulders.append(shoulder)
 	elbows.append(elbow)
-	part(shoulder, Vector3.ZERO, Vector3(0.18, 0.15, 0.17), armor if look == Look.BLACK_PANTHER else accent)
-	part(shoulder, Vector3(0, -0.145, 0), Vector3(0.125, 0.25, 0.126), armor)
-	part(elbow, Vector3.ZERO, Vector3(0.113, 0.095, 0.11), frame)
-	part(elbow, Vector3(0, -0.14, 0), Vector3(0.134, 0.24, 0.13), armor)
-	part(elbow, Vector3(0, -0.285, 0), Vector3(0.105, 0.12, 0.11), frame)
+	var shoulder_width: float = SHOULDER_WIDTH[look]
+	var pad := shell(shoulder, Vector3(side * 0.033, 0.032, 0.002),
+		Vector3(shoulder_width, 0.225 if look in [Look.ULTRON, Look.WAR_MACHINE] else 0.185, 0.257), armor)
+	pad.rotation.z = side * (0.33 if look == Look.ULTRON else 0.15)
+	var inlay := shell(shoulder, Vector3(side * shoulder_width * 0.44, 0.041, 0.012),
+		Vector3(0.084, 0.125, 0.201), accent)
+	inlay.rotation.z = side * 0.21
+	part(shoulder, Vector3(side * shoulder_width * 0.48, 0.107, 0.023), Vector3(0.038, 0.031, 0.098), visor)
+	shell(shoulder, Vector3(0, -0.145, 0), Vector3(0.146, 0.256, 0.158), armor)
+	shell(elbow, Vector3.ZERO, Vector3(0.124, 0.115, 0.128), frame)
+	var forearm := 0.137 if look == Look.SPIDER_MAN else (0.195 if look == Look.WAR_MACHINE else 0.167)
+	shell(elbow, Vector3(side * 0.010, -0.125, 0.040), Vector3(forearm, 0.239, 0.205), armor)
+	shell(elbow, Vector3(side * 0.058, -0.103, 0.090), Vector3(0.088, 0.176, 0.116), accent)
+	shell(elbow, Vector3(0, -0.284, 0.011), Vector3(0.121, 0.128, 0.13), frame)
 	hands.append(joint(elbow, Vector3(0, -0.32, 0)))
 	if look == Look.BLACK_PANTHER:
 		for claw in range(-1, 2):
-			part(elbow, Vector3(claw * 0.027, -0.349, 0.038),
-				Vector3(0.012, 0.067, 0.015), accent)
+			shell(elbow, Vector3(claw * 0.036, -0.362, 0.072),
+				Vector3(0.021, 0.112 - absf(claw) * 0.018, 0.029), accent)
 
 
 func pose_walk(cycle: float, crouch := 0.0, stride := 1.0) -> void:
@@ -275,11 +299,56 @@ func part(parent: Node3D, at: Vector3, size: Vector3, finish: StandardMaterial3D
 	return instance
 
 
+func shell(parent: Node3D, at: Vector3, dimensions: Vector3, finish: StandardMaterial3D) -> MeshInstance3D:
+	if shell_mesh == null:
+		shell_mesh = make_shell_mesh()
+	var instance := MeshInstance3D.new()
+	instance.mesh = shell_mesh
+	instance.scale = dimensions
+	instance.material_override = finish
+	parent.add_child(instance)
+	instance.position = at
+	return instance
+
+
+static func make_shell_mesh() -> ArrayMesh:
+	var surface := SurfaceTool.new()
+	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for row in range(SHELL_HEIGHTS.size() - 1):
+		for index in range(SHELL_OUTLINE.size()):
+			var next := (index + 1) % SHELL_OUTLINE.size()
+			var a := shell_vertex(index, row)
+			var b := shell_vertex(next, row)
+			var c := shell_vertex(next, row + 1)
+			var d := shell_vertex(index, row + 1)
+			shell_face(surface, a, b, c)
+			shell_face(surface, a, c, d)
+	var top := SHELL_HEIGHTS.size() - 1
+	for index in range(SHELL_OUTLINE.size()):
+		var next := (index + 1) % SHELL_OUTLINE.size()
+		shell_face(surface, Vector3(0, SHELL_HEIGHTS[top], 0), shell_vertex(index, top), shell_vertex(next, top))
+		shell_face(surface, Vector3(0, SHELL_HEIGHTS[0], 0), shell_vertex(next, 0), shell_vertex(index, 0))
+	surface.index()
+	return surface.commit()
+
+
+static func shell_vertex(index: int, row: int) -> Vector3:
+	var outline: Vector2 = SHELL_OUTLINE[index] * SHELL_WIDTHS[row]
+	return Vector3(outline.x, SHELL_HEIGHTS[row], outline.y)
+
+
+static func shell_face(surface: SurfaceTool, a: Vector3, b: Vector3, c: Vector3) -> void:
+	var normal := (c - a).cross(b - a).normalized()
+	for point in [a, b, c]:
+		surface.set_normal(normal)
+		surface.add_vertex(point)
+
+
 func material(color: Color, metal: float, emit := false) -> StandardMaterial3D:
 	var finish := StandardMaterial3D.new()
 	finish.albedo_color = color
 	finish.metallic = metal
-	finish.roughness = 0.55
+	finish.roughness = 0.43
 	finish.emission_enabled = emit
 	finish.emission = color
 	return finish
