@@ -115,6 +115,14 @@ func test_rules() -> void:
 	check(not game.players[3].alive and "장외 탈락" in game.feed[0], "outside defeat occurs at zero health")
 	check(game.rankings[0].id == 1 and game.rankings[0].award == 145 and game.rankings[1].id == 3,
 		"kills take priority over damage for gold")
+	check(game.rankings[1].award == 140 and game.rankings[2].id == 2 and game.players[2].gold == 130,
+		"last place earns 130 gold for the next shop")
+	game.buy(2, Rules.MOVE)
+	check(game.players[2].levels[Rules.MOVE] == 0 and game.players[2].gold == 130,
+		"a last-place player with no savings cannot buy a movement skill")
+	game.buy(2, Rules.E)
+	check(game.players[2].levels[Rules.E] == 1 and game.players[2].gold == 5,
+		"last place can still buy an E skill")
 
 
 func test_attack_windup() -> void:
@@ -241,16 +249,23 @@ func test_loadouts() -> void:
 	game.reset_player(pilot, Vector2(-23, 0))
 	game.reset_player(rival, Vector2(23, 0))
 	game.cast(1, Rules.MOVE, rival.p)
+	check(is_equal_approx(pilot.kick.x, 775.0), "level-one tackle starts at the reduced rush speed")
 	check(game.effects.back().vfx == Rules.Vfx.TACKLE_LAUNCH, "tackle marks its launch effect")
 	var tagged_tackle_hit := false
+	var tackle_force := 0.0
 	for step in range(24):
+		var before: Vector2 = pilot.p
 		game.advance(1.0 / 60.0)
-		if not game.effects.is_empty() and game.effects.back().vfx == Rules.Vfx.TACKLE_HIT:
+		if not tagged_tackle_hit and not game.effects.is_empty() and game.effects.back().vfx == Rules.Vfx.TACKLE_HIT:
 			tagged_tackle_hit = true
+			var strength := clampf(before.distance_to(pilot.p) / 12.0, 0.35, 1.0)
+			tackle_force = rival.kick.length() / (
+				strength * Rules.knockback_multiplier(rival.impact) * Rules.KNOCKBACK_SPEED_SCALE)
 	check(tagged_tackle_hit, "tackle marks its contact effect")
+	check(is_equal_approx(tackle_force, 590.0), "fast tackle hits with the reduced knockback force")
 	var fast_damage: float = 100.0 - rival.hp
-	game.reset_player(pilot, Vector2(-85, 0))
-	game.reset_player(rival, Vector2(85, 0))
+	game.reset_player(pilot, Vector2(-80, 0))
+	game.reset_player(rival, Vector2(80, 0))
 	game.cast(1, Rules.MOVE, rival.p)
 	for step in range(24):
 		game.advance(1.0 / 60.0)
@@ -263,6 +278,14 @@ func test_loadouts() -> void:
 	for step in range(24):
 		game.advance(1.0 / 60.0)
 	check(pilot.hp == 94.0 and pilot.charge == 0.0 and rival.hp == 100.0, "projectile damages and stops a tackle")
+	game.reset_player(pilot, Vector2.ZERO)
+	pilot.choices[Rules.MOVE] = 0
+	game.cast(1, Rules.MOVE, Vector2.RIGHT * 100.0)
+	check(is_equal_approx(pilot.kick.x, 875.0) and is_equal_approx(pilot.cooldowns[Rules.MOVE], 4.4),
+		"blink thrust starts faster and has a shorter cooldown")
+	for step in range(15):
+		game.advance(1.0 / 60.0)
+	check(pilot.p.x > 125.0, "blink thrust travels farther during its first quarter-second")
 	for slot in [Rules.Q, Rules.E, Rules.R, Rules.F, Rules.MOVE]:
 		for choice in range(Rules.SLOTS[slot].options.size()):
 			game.reset_player(pilot, Vector2(-85, 0))
@@ -402,6 +425,86 @@ func test_equipment() -> void:
 	check(not rescue.gear_used and rescue.equipment == [1], "equipment stays equipped and protection resets for the new round")
 
 
+func test_new_skill_variants() -> void:
+	var game := Match.new()
+	game.add_player(1, "One")
+	game.add_player(2, "Two")
+	game.start_match()
+	game.round_no = 2
+	var pilot: Dictionary = game.players[1]
+	var rival: Dictionary = game.players[2]
+	pilot.gold = 1000
+	for slot in [Rules.Q, Rules.E, Rules.R, Rules.F, Rules.MOVE]:
+		game.buy(1, slot, Rules.SLOTS[slot].options.size() - 1)
+	game.advance(Rules.SHOP_TIME)
+	game.advance(3.0)
+	game.reset_player(pilot, Vector2.ZERO)
+	game.reset_player(rival, Vector2(500, 0))
+	cast_immediately(game, 1, Rules.Q, Vector2.RIGHT * 100.0)
+	check(game.shots.size() == 2 and game.shots[0].v.y < 0.0 and game.shots[1].v.y > 0.0,
+		"twin shot fans out to both sides")
+	game.shots.clear()
+	cast_immediately(game, 1, Rules.E, Vector2.RIGHT * 100.0)
+	var strike_points := game.strikes.map(func(strike: Dictionary): return strike.p)
+	check(strike_points.size() == 2 and Vector2(100, -55) in strike_points
+		and Vector2(100, 55) in strike_points, "crossfire flanks the chosen point")
+	game.strikes.clear()
+	cast_immediately(game, 1, Rules.R, Vector2.RIGHT * 100.0)
+	rival.p = Vector2(100, 0)
+	game.advance(0.40)
+	check(rival.hp == 100.0 and game.strikes.size() == 1, "impact burst telegraphs before exploding")
+	game.advance(0.07)
+	check(rival.hp == 88.0, "impact burst deals 12 base damage")
+	game.reset_player(rival, Vector2(100, 0))
+	rival.impact = 120.0
+	pilot.cooldowns[Rules.R] = 0.0
+	cast_immediately(game, 1, Rules.R, Vector2.RIGHT * 100.0)
+	game.advance(0.47)
+	check(rival.hp == 70.0, "impact burst adds 18 damage against a target with 120 impact")
+	pilot.kick = Vector2.LEFT * 300.0
+	game.cast(1, Rules.F, Vector2.ZERO)
+	check(pilot.kick == Vector2.ZERO and pilot.guard > 0.0, "inertia brake stops knockback and grants brief guard")
+	game.cast(1, Rules.MOVE, Vector2.RIGHT * 100.0)
+	check(is_equal_approx(pilot.kick.x, -460.0) and pilot.aim == Vector2.RIGHT
+		and is_equal_approx(pilot.cooldowns[Rules.MOVE], 4.0), "backstep makes a shorter jump with a shorter cooldown")
+
+
+func test_round_limit_and_new_gear() -> void:
+	var game := Match.new()
+	game.add_player(1, "One")
+	game.add_player(2, "Two")
+	check(game.set_round_limit(2) and not game.set_round_limit(0) and not game.set_round_limit(Rules.MAX_ROUNDS + 1),
+		"lobby round limit validates its range")
+	game.start_match()
+	check(not game.set_round_limit(3) and game.snapshot().round_limit == 2, "round limit locks at match start")
+	game.players[1].damage = 1
+	game.finish_round(1)
+	check(game.phase == Match.SHOP and game.round_no == 2 and game.rankings[0].award > 0,
+		"rounds before the chosen limit still award shop gold")
+	check(game.rankings[1].award == 130, "the runner-up in a two-player round receives the last-place payout")
+	var pilot: Dictionary = game.players[1]
+	pilot.gold = 1000
+	for choice in range(9, 12):
+		game.buy(1, Rules.GEAR, choice)
+	check(pilot.equipment == [9, 10, 11], "all three new items can be purchased")
+	game.buy(1, Rules.F, 0)
+	game.advance(Rules.SHOP_TIME)
+	game.advance(3.0)
+	game.cast(1, Rules.F, Vector2.ZERO)
+	check(is_equal_approx(pilot.cooldowns[Rules.F], Rules.cooldown(Rules.F, 0, 1) * 0.86),
+		"recharge module reduces utility cooldown")
+	game.cast(1, Rules.BASIC, Vector2.ZERO)
+	game.advance(0.11)
+	check(game.shots.size() == 1 and is_equal_approx(game.shots[0].v.length(), 384.0 * 1.18),
+		"accelerator modifies projectile speed")
+	pilot.guard = 0.0
+	game.hit(2, 1, 8, 255.0, Vector2.RIGHT)
+	check(is_equal_approx(pilot.kick_decay, Rules.knockback_decay(pilot.hp) * 1.20),
+		"stabilizer accelerates hit knockback decay")
+	game.finish_round(1)
+	check(game.phase == Match.RESULTS and game.rankings[0].award == 0, "match ends at the selected limit")
+
+
 func test_combat_gear() -> void:
 	var game := Match.new()
 	game.add_player(1, "Siphon")
@@ -457,7 +560,8 @@ func test_extended_casts() -> void:
 	game.reset_player(rival, Vector2(100, 90))
 	cast_immediately(game, 1, Rules.Q, Vector2.ZERO)
 	game.advance(0.05)
-	check(game.shots.size() == 1 and game.shots[0].v.y < 0.0, "orbit bolt bends left")
+	check(game.shots.size() == 1 and game.shots[0].v.y < 0.0 and game.shots[0].size == 10.0,
+		"the wider orbit bolt still bends left")
 	game.shots.clear()
 	pilot.choices[Rules.Q] = 5
 	pilot.cooldowns[Rules.Q] = 0.0
@@ -480,9 +584,14 @@ func test_extended_casts() -> void:
 	game.reset_player(pilot, Vector2(-180, 0))
 	game.cast(1, Rules.R, Vector2.ZERO)
 	game.steer(1, Vector2.ZERO, Vector2(-500, 80))
-	game.advance(0.76)
+	game.advance(0.60)
+	check(game.shots.is_empty(), "charged bolt still requires a windup")
+	game.advance(0.06)
 	check(game.shots.size() == 1 and (game.shots[0].v as Vector2).normalized().is_equal_approx(Vector2.RIGHT),
 		"charged bolt retains its telegraphed direction")
+	game.reset_player(rival, Vector2(70, 0))
+	game.advance(0.70)
+	check(rival.hp == 58.0, "level-one charged bolt deals 42 health damage on a direct hit")
 	game.shots.clear()
 	var anchor: Vector2 = pilot.p
 	game.cast(1, Rules.F, Vector2.ZERO)
@@ -626,14 +735,31 @@ func test_tactical_casts() -> void:
 
 	game.reset_player(rival, Vector2(80, 0))
 	cast_immediately(game, 2, Rules.E, Vector2(200, 0))
-	game.advance(0.43)
+	game.advance(0.24)
 	check(game.strikes.size() == 1 and game.shots.is_empty(), "repeater telegraphs before firing")
-	game.advance(0.02)
+	game.advance(0.04)
+	check(game.shots.size() == 1 and game.shots[0].damage == 7 and game.shots[0].size == 7.0,
+		"repeater fires its wider and stronger first projectile sooner")
 	game.steer(2, Vector2.ZERO, Vector2(80, 300))
-	game.advance(0.44)
-	game.advance(0.43)
+	game.advance(0.32)
+	check(game.shots.size() == 2, "repeater fires again after the shorter interval")
+	game.advance(0.32)
 	check(game.strikes.is_empty() and game.shots.size() == 3 and game.shots.all(func(shot: Dictionary): return shot.v.x > 0.0 and shot.v.y == 0.0),
 		"repeater fires three times from its placed position in its original direction")
+	game.shots.clear()
+	game.reset_player(rival, Vector2(80, 0))
+	game.reset_player(pilot, Vector2(380, 38))
+	rival.levels[Rules.E] = 3
+	cast_immediately(game, 2, Rules.E, Vector2(200, 0))
+	check(is_equal_approx(rival.cooldowns[Rules.E], 9.0) and is_equal_approx(Rules.cooldown(Rules.E, 5, 2), 9.6),
+		"repeater upgrades shorten its cooldown by 0.6 seconds per level")
+	game.advance(0.28)
+	check(game.shots.size() == 1 and is_zero_approx(game.shots[0].v.y),
+		"the first repeater shot still leaves the barrel straight")
+	for step in range(5):
+		game.advance(0.04)
+	check(game.shots.size() == 1 and game.shots[0].v.angle() > 0.0 and game.shots[0].v.angle() < 0.15,
+		"repeater shot bends gently toward a nearby enemy ahead")
 
 
 func test_cloak_collision() -> void:
@@ -643,7 +769,10 @@ func test_cloak_collision() -> void:
 		game.add_player(id, "Pilot %d" % id)
 	game.start_match()
 	game.round_no = 2
+	game.players[1].gold = 135
 	game.buy(1, Rules.MOVE, 4)
+	check(game.players[1].levels[Rules.MOVE] == 1 and game.players[1].gold == 0,
+		"movement skill costs 135 gold")
 	game.advance(Rules.SHOP_TIME)
 	game.advance(3.0)
 	var pilot: Dictionary = game.players[1]
@@ -764,6 +893,11 @@ func test_network() -> void:
 	if not await wait_for(func(): return client.state.get("players", {}).size() == 2, "lobby replication over ENet"):
 		return
 	var client_id: int = client.own_id
+	server.hud.round_limit_options.item_selected.emit(2)
+	await wait_for(func(): return client.state.round_limit == 3, "host round limit replicates to the client")
+	client.set_round_limit(1)
+	check(server.sim.round_limit == 3, "a client cannot change the round limit")
+	server.set_round_limit(Rules.ROUNDS)
 	client.hud.character_buttons[5].pressed.emit()
 	await wait_for(func(): return (client.state.players[client_id].character == 5
 		and server.sim.players[client_id].character == 5), "Black Panther choice replicates through the lobby")
@@ -846,6 +980,7 @@ func test_network() -> void:
 			client.sell_gear(0)
 			await wait_for(func(): return client.state.players[client_id].equipment.is_empty() and client.state.players[client_id].gold == gold_before - 45,
 				"client sale clears equipment and replicates half the purchase price")
+			server.sell_gear(Rules.EMERGENCY_GEAR)
 			server.buy_slot(Rules.GEAR, Rules.SHIELD_GEAR)
 			await wait_for(func(): return Rules.SHIELD_GEAR in client.state.players[1].equipment, "new gear purchase replicates")
 		elif round_no == 3:
@@ -953,6 +1088,8 @@ func run() -> void:
 	test_projectile_tactics()
 	test_equipment()
 	test_combat_gear()
+	test_new_skill_variants()
+	test_round_limit_and_new_gear()
 	test_extended_casts()
 	test_repel()
 	test_tactical_casts()

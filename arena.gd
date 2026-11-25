@@ -33,6 +33,8 @@ var pulse_texture: Texture2D
 var gravity_texture: Texture2D
 var glow_texture: GradientTexture2D
 var skill_effects: SkillEffects
+var render_3d: bool = DisplayServer.get_name() != "headless" and not ProjectSettings.get_setting(
+	"rimfall/startup/safe_display", false)
 
 
 func _ready() -> void:
@@ -102,7 +104,7 @@ func _process(delta: float) -> void:
 				current_trails[id] = trail
 	fighter_steps = current_steps
 	tackle_trails = current_trails
-	if DisplayServer.get_name() != "headless":
+	if render_3d:
 		update_combat_views(phase, players)
 	update_camera(phase, players, delta)
 	var current_shots := {}
@@ -477,6 +479,10 @@ func draw_cast_preview(player: Dictionary, target: Vector2) -> void:
 		return
 	var skill := Rules.skill(preview_slot, player.choices[preview_slot])
 	var tint: Color = Rules.SLOTS[preview_slot].color
+	if skill.id == "twin_shot":
+		for side: float in [-1.0, 1.0]:
+			draw_projectile_preview(player, origin, aim.rotated(side * Rules.TWIN_SHOT_SPREAD), skill.shot, tint)
+		return
 	if skill.has("shot") and skill.id not in ["scatter", "repeater"]:
 		draw_projectile_preview(player, origin, aim, skill.shot, tint)
 		return
@@ -488,6 +494,10 @@ func draw_cast_preview(player: Dictionary, target: Vector2) -> void:
 			draw_aim_area(origin + aim * Rules.FISSURE_STEP * index, radius, tint)
 		return
 	var center := origin if skill.id == "repel" else Match.cast_aim_point(origin, offset, skill.id)
+	if skill.id == "crossfire":
+		for side: float in [-1.0, 1.0]:
+			draw_aim_area(center + aim.orthogonal() * Rules.CROSSFIRE_OFFSET * side, radius, tint)
+		return
 	draw_aim_area(center, radius, tint)
 	if skill.id == "scatter":
 		for spoke in range(4):

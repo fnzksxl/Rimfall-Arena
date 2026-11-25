@@ -6,7 +6,7 @@ const Arena = preload("res://arena.gd")
 const Hud = preload("res://hud.gd")
 const Sounds = preload("res://sounds.gd")
 const Motion = preload("res://motion.gd")
-const VERSION := 28
+const VERSION := 31
 const CAST_KEYS := [KEY_Q, KEY_E, KEY_R, KEY_F, KEY_SPACE]
 const CONTROLS_PATH := "user://controls.cfg"
 enum { MENU, CONNECTING, ROOM }
@@ -254,6 +254,11 @@ func primary_action() -> void:
 		elif phase == Match.RESULTS:
 			sim.return_to_lobby()
 			status = ""
+		broadcast_state(true)
+
+
+func set_round_limit(limit: int) -> void:
+	if screen == ROOM and host and sim.set_round_limit(limit):
 		broadcast_state(true)
 
 

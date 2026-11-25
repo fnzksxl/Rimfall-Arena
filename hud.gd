@@ -30,6 +30,8 @@ var menu_status: Label
 var sidebar: Panel
 var change_button: Button
 var team_button: Button
+var round_limit_label: Label
+var round_limit_options: OptionButton
 var team_score_badge: Label
 var copy_button: Button
 var address_options: OptionButton
@@ -271,6 +273,11 @@ func build_game() -> void:
 	sidebar_hint = label(sidebar, Rect2(21, 541, 324, 25), "", 14, SUBTLE)
 	change_button = button(sidebar, Rect2(21, 574, 324, 52), "", func(): game.primary_action(), true)
 	team_button = button(sidebar, Rect2(21, 377, 324, 44), "", func(): game.switch_team())
+	round_limit_label = label(sidebar, Rect2(22, 432, 141, 44), "최대 라운드", 16)
+	round_limit_options = selector(sidebar, Rect2(164, 432, 181, 44), "최대 라운드")
+	for limit in range(1, Rules.MAX_ROUNDS + 1):
+		round_limit_options.add_item("%d라운드" % limit, limit)
+	round_limit_options.item_selected.connect(func(index: int): game.set_round_limit(round_limit_options.get_item_id(index)))
 	copy_button = button(sidebar, Rect2(235, 490, 110, 44), "주소 복사", func(): game.copy_address(address_options.selected))
 	address_options = selector(sidebar, Rect2(21, 490, 204, 44), "호스트 주소")
 	for index in range(Rules.CAPACITY):
@@ -331,7 +338,7 @@ func build_character_picker() -> void:
 		@warning_ignore("integer_division")
 		var row := choice / 3
 		var card := panel(character_picker, Rect2(24 + column * 268, 65 + row * 180, 260, 172), TILE)
-		if DisplayServer.get_name() != "headless":
+		if game.arena.render_3d:
 			var preview := CombatView.new()
 			preview.variant = choice
 			card.add_child(preview)
@@ -358,8 +365,8 @@ func build_picker() -> void:
 	picker_title = label(picker, Rect2(23, 16, 543, 36), "", 24)
 	button(picker, Rect2(827, 16, 75, 44), "닫기", close_picker)
 	picker_note = label(picker, Rect2(24, 55, 780, 25), "", 15, SUBTLE)
-	for page in range(2):
-		var tab := button(picker, Rect2(565 + page * 130, 16, 120, 44), "", func(): picker_page = page)
+	for page in range(ceili(Rules.SLOTS[Rules.GEAR].options.size() / float(GEAR_PAGE_SIZE))):
+		var tab := button(picker, Rect2(454 + page * 122, 16, 112, 44), "", func(): picker_page = page)
 		tab.add_theme_stylebox_override("disabled", style(Color("#183135"), MINT, 8))
 		tab.add_theme_color_override("font_disabled_color", MINT)
 		picker_tabs.append(tab)
@@ -425,10 +432,11 @@ func update_picker(phase: int, local: Dictionary) -> void:
 	var page_size := GEAR_PAGE_SIZE if gear else Rules.MAX_CHOICES
 	var start := picker_page * page_size
 	var count := mini(page_size, slot.options.size() - start)
+	var page_count := ceili(slot.options.size() / float(page_size))
 	for page in range(picker_tabs.size()):
-		picker_tabs[page].visible = slot.options.size() > page_size
+		picker_tabs[page].visible = page_count > 1 and page < page_count
 		picker_tabs[page].disabled = page == picker_page
-		picker_tabs[page].text = ["기동·장외", "방어·회복"][page] if gear else ("%d / %d 페이지" % [page + 1, picker_tabs.size()])
+		picker_tabs[page].text = "%d / %d" % [page + 1, page_count]
 	picker_title.text = "장비 상점" if gear else "%s  ·  %s" % [slot.key, slot.name]
 	picker_title.add_theme_color_override("font_color", slot.color)
 	picker_note.text = "%d/%d개 장착  ·  판매 시 구매가의 절반 반환" % [local.equipment.size(), Rules.EQUIPMENT_CAP] if gear else (
@@ -456,7 +464,7 @@ func update_picker(phase: int, local: Dictionary) -> void:
 			continue
 		var maxed := equipped and level >= Rules.level_cap(picker_slot)
 		var locked := level > 0 and not equipped
-		var cd := Rules.cooldown(picker_slot, choice, maxi(level, 1))
+		var cd := Rules.cooldown(picker_slot, choice, maxi(level, 1), local)
 		option_meta[index].text = "재사용 %.1f초%s" % [cd, "  ·  장착 중" if equipped else ""]
 		action.text = "선택 불가" if locked else ("최대 레벨" if maxed else "%s %d G" % ["강화" if equipped else "구매", cost])
 		action.disabled = locked or maxed or local.gold < cost
@@ -500,7 +508,7 @@ func update_view(state: Dictionary, screen: int, local_id: int, status: String,
 			team_active[player.team] += 1
 	var teams: bool = state.get("mode", Match.FREE_FOR_ALL) == Match.TEAM_MATCH
 	var mode := ("%s 연습전" % ("팀" if teams else "개인")) if practice_mode else ("친구 팀전" if teams else "친구 개인전")
-	round_badge.text = "%s    %02d / %02d" % [mode, round_no, Rules.ROUNDS] if round_no else mode
+	round_badge.text = "%s    %02d / %02d" % [mode, round_no, state.get("round_limit", Rules.ROUNDS)] if round_no else mode
 	var survival := "블루 %d · 오렌지 %d" % team_active if teams else "%d명 생존" % active
 	phase_badge.text = ["대기실", "정비 시간  ·  %02d초" % remaining, "시작까지  %d" % remaining,
 		"%02d:%02d  ·  %s" % [elapsed / 60, elapsed % 60, survival], "최종 결과"][phase]
@@ -595,6 +603,10 @@ func update_sidebar(state: Dictionary, phase: int, players: Dictionary, local: D
 	var ready: bool = local.get("ready", false)
 	change_button.visible = shopping or (is_host and phase in [Match.LOBBY, Match.RESULTS])
 	change_button.disabled = phase == Match.LOBBY and not Match.can_start(players, mode)
+	round_limit_label.visible = phase == Match.LOBBY
+	round_limit_options.visible = round_limit_label.visible
+	round_limit_options.disabled = not is_host
+	round_limit_options.select(int(state.get("round_limit", Rules.ROUNDS)) - 1)
 	team_button.visible = teams and phase == Match.LOBBY and not local.is_empty()
 	if team_button.visible:
 		var other: int = 1 - local.team
@@ -706,4 +718,4 @@ func update_skills(local: Dictionary, phase: int) -> void:
 				skill_status[slot].text = blocked
 			elif slot == Rules.MOVE and local.get("cloak", 0.0) > 0.0:
 				skill_status[slot].text = "은신 %.1f초" % local.cloak
-		skill_fill[slot].size.x = 168.0 * clampf(1.0 - cd / Rules.cooldown(slot, choice, maxi(level, 1)), 0.0, 1.0) if level else 0.0
+		skill_fill[slot].size.x = 168.0 * clampf(1.0 - cd / Rules.cooldown(slot, choice, maxi(level, 1), local), 0.0, 1.0) if level else 0.0

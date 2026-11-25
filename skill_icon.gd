@@ -181,3 +181,27 @@ func _draw() -> void:
 		"shield_cell":
 			stroke([Vector2(0, -16), Vector2(13, -10), Vector2(11, 6), Vector2(0, 16), Vector2(-11, 6), Vector2(-13, -10), Vector2(0, -16)])
 			stroke([Vector2(2, -8), Vector2(-4, 1), Vector2(3, 1), Vector2(-2, 8)])
+		"accelerator":
+			stroke([Vector2(-14, -8), Vector2(-5, 0), Vector2(-14, 8)])
+			stroke([Vector2(-3, -10), Vector2(10, 0), Vector2(-3, 10)])
+		"recharge":
+			draw_arc(Vector2.ZERO, 13, -2.45, 2.20, 24, tint, 2.2, true)
+			stroke([Vector2(0, -8), Vector2(-4, 1), Vector2(4, 1), Vector2(0, 8)])
+		"stabilizer":
+			stroke([Vector2(-14, -8), Vector2(-6, 5), Vector2(6, 5), Vector2(14, -8)])
+			stroke([Vector2(-14, 11), Vector2(14, 11)])
+		"twin_shot":
+			stroke([Vector2(-13, 0), Vector2(13, -10)])
+			stroke([Vector2(-13, 0), Vector2(13, 10)])
+		"crossfire":
+			for side: float in [-1.0, 1.0]:
+				draw_circle(Vector2(9 * side, 0), 6.0, tint, false, 2.0, true)
+		"impact_burst":
+			draw_circle(Vector2.ZERO, 13.0, tint, false, 2.2, true)
+			stroke([Vector2(2, -9), Vector2(-5, 1), Vector2(4, 1), Vector2(-1, 9)])
+		"brake":
+			stroke([Vector2(-13, -11), Vector2(-13, 11)])
+			stroke([Vector2(-5, -8), Vector2(12, -8), Vector2(12, 8), Vector2(-5, 8)])
+		"backstep":
+			stroke([Vector2(14, 0), Vector2(-13, 0), Vector2(-5, -8)])
+			stroke([Vector2(-13, 0), Vector2(-5, 8)])

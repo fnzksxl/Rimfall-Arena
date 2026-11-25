@@ -12,6 +12,7 @@ var team_wins := [0, 0]
 var team_forfeit := false
 var epoch := 0
 var round_no := 0
+var round_limit := Rules.ROUNDS
 var left := 0.0
 var elapsed := 0.0
 var half_side := Rules.HALF_SIDE
@@ -74,6 +75,13 @@ func select_character(id: int, choice: int) -> bool:
 	if phase != LOBBY or not players.has(id) or choice < 0 or choice >= Rules.CHARACTER_NAMES.size():
 		return false
 	players[id].character = choice
+	return true
+
+
+func set_round_limit(limit: int) -> bool:
+	if phase != LOBBY or limit < 1 or limit > Rules.MAX_ROUNDS:
+		return false
+	round_limit = limit
 	return true
 
 
@@ -278,6 +286,10 @@ static func cast_aim_point(origin: Vector2, offset: Vector2, skill_id: String) -
 	match skill_id:
 		"mark":
 			return origin + offset.limit_length(330.0)
+		"crossfire":
+			return origin + offset.limit_length(275.0)
+		"impact_burst":
+			return origin + offset.limit_length(300.0)
 		"scatter":
 			return origin + offset.limit_length(250.0)
 		"repeater":
@@ -316,7 +328,7 @@ func cast(id: int, slot: int, target: Vector2) -> void:
 			player.propulsion = 0.28
 			effect(player.p, tint, 40.0, 0.28, 0, -1, direction, Rules.Vfx.DOUBLE_RECAST)
 		return
-	player.cooldowns[slot] = Rules.cooldown(slot, choice, level)
+	player.cooldowns[slot] = Rules.cooldown(slot, choice, level, player)
 	var delay := Rules.cast_delay(slot, choice)
 	var aim_point := cast_aim_point(player.p, offset, Rules.skill(slot, choice).id)
 	if delay > 0.0:
@@ -357,8 +369,16 @@ func release_cast(id: int, slot: int, direction: Vector2, target: Vector2) -> vo
 				player.kick = player.kick * 0.5 - direction * 410.0
 				player.kick_decay = Rules.PROPULSION_DECAY
 				effect(player.p, tint, 31.0, 0.24, 0, -1, -direction, vfx)
+		"twin_shot":
+			for side: float in [-1.0, 1.0]:
+				var aim := direction.rotated(side * Rules.TWIN_SHOT_SPREAD)
+				shoot(id, slot, aim, player.p + aim * 20.0, skill.shot, level, vfx)
 		"mark":
 			add_strike(id, slot, target, Rules.AREA_RADII.mark, 0.70 - Rules.AREA_WINDUP, 24, 505.0, level, vfx)
+		"crossfire":
+			for side: float in [-1.0, 1.0]:
+				var point := target + direction.orthogonal() * Rules.CROSSFIRE_OFFSET * side
+				add_strike(id, slot, point, Rules.AREA_RADII.crossfire, 0.42, 16, 365.0, level, vfx)
 		"repel":
 			add_strike(id, slot, player.p, Rules.AREA_RADII.repel, Rules.REPEL_RELEASE_DELAY, 14, 420.0, level, vfx, true)
 		"fissure":
@@ -371,12 +391,14 @@ func release_cast(id: int, slot: int, direction: Vector2, target: Vector2) -> vo
 				"left": delay, "duration": delay, "size": Rules.AREA_RADII.scatter, "pull": false,
 				"scatter": true, "angle": direction.angle(), "skill": skill, "level": level, "vfx": vfx})
 		"repeater":
-			var delay := 0.58 - Rules.AREA_WINDUP
+			var delay := Rules.REPEATER_FIRST_SHOT - Rules.AREA_WINDUP
 			strikes.append({"owner": id, "slot": slot, "p": target, "left": delay, "duration": delay,
 				"size": Rules.AREA_RADII.repeater, "pull": false, "repeats": 3, "angle": direction.angle(),
 				"skill": skill, "level": level, "vfx": vfx})
 		"gravity":
 			add_strike(id, slot, target, Rules.AREA_RADII.gravity, 0.85, 27, 685.0, level, vfx)
+		"impact_burst":
+			add_strike(id, slot, target, Rules.AREA_RADII.impact_burst, 0.46, 20, 390.0, level, vfx)
 		"windup":
 			shoot(id, slot, direction, player.p + direction * 20.0, skill.shot, level, vfx)
 			player.kick = player.kick * 0.65 - direction * 255.0
@@ -392,6 +414,11 @@ func release_cast(id: int, slot: int, direction: Vector2, target: Vector2) -> vo
 			player.impact = maxf(0.0, player.impact - 32.0 - (level - 1) * 10.0)
 			player.kick *= 0.28
 			effect(player.p, Color("#ffb473"), 56.0, 0.38, 0, -1, Vector2.ZERO, vfx)
+		"brake":
+			player.kick = Vector2.ZERO
+			player.propulsion = 0.0
+			player.guard = maxf(player.guard, 0.32 + (level - 1) * 0.12)
+			effect(player.p, tint, 35.0, 0.32, 0, Rules.Cue.GUARD, Vector2.ZERO, vfx)
 		"reflect":
 			player.reflect = 0.9 + (level - 1) * 0.25
 			effect(player.p, tint, 35.0, 0.22, 0, -1, Vector2.ZERO, vfx)
@@ -423,8 +450,13 @@ func release_cast(id: int, slot: int, direction: Vector2, target: Vector2) -> vo
 			player.kick_decay = Rules.PROPULSION_DECAY
 			player.propulsion = 0.24
 			effect(player.p, tint, 38.0, 0.26, 0, -1, player.kick.normalized(), vfx)
+		"backstep":
+			player.kick = -direction * (460.0 + (level - 1) * 55.0)
+			player.kick_decay = Rules.PROPULSION_DECAY
+			player.propulsion = 0.26
+			effect(player.p, tint, 38.0, 0.26, 0, Rules.Cue.DASH, -direction, vfx)
 		"dash", "recover", "tackle":
-			var speed := 700.0 if skill.id == "dash" else 825.0
+			var speed := 875.0 if skill.id == "dash" else 825.0
 			if skill.id == "recover":
 				var edge := Vector2.ONE * (half_side - 30.0)
 				var pos: Vector2 = player.p
@@ -436,6 +468,7 @@ func release_cast(id: int, slot: int, direction: Vector2, target: Vector2) -> vo
 				if outside:
 					vfx = Rules.Vfx.RECOVER_OUTSIDE
 			elif skill.id == "tackle":
+				speed = 775.0
 				player.charge = 0.37
 			player.kick = player.kick * 0.24 + direction * (speed + (level - 1) * 75.0)
 			player.kick_decay = Rules.PROPULSION_DECAY
@@ -456,7 +489,7 @@ func shoot(id: int, slot: int, direction: Vector2, origin: Vector2, profile: Dic
 		"v": direction * speed, "age": 0.0, "size": profile.size,
 		"damage": Rules.attack_damage(profile.damage + (level - 1) * profile.gain),
 		"force": 0.0 if profile.force == 0.0 else profile.force + (level - 1) * 38.0, "slot": slot, "style": profile.style,
-		"curve": profile.get("curve", 0.0), "seeks": profile.get("seeks", false),
+		"curve": profile.get("curve", 0.0), "guidance": profile.get("guidance", {}),
 		"proc": profile.get("proc", Rules.NO_PROC), "level": level, "bounces": 2,
 		"pierce": profile.get("pierce", false), "turn_at": profile.get("turn_distance", 0.0) / speed,
 		"hit": [], "vfx": vfx, "visual_step": int(vfx == Rules.Vfx.CURVE)})
@@ -504,7 +537,7 @@ func hit(owner: int, victim: int, damage: int, force: float, direction: Vector2,
 	if force > 0.0:
 		var speed := force * Rules.knockback_multiplier(player.impact) * resistance * Rules.KNOCKBACK_SPEED_SCALE
 		player.kick = (player.kick * 0.55 + direction * speed).limit_length(1800.0 * Rules.KNOCKBACK_SPEED_SCALE)
-		player.kick_decay = Rules.knockback_decay(player.hp)
+		player.kick_decay = Rules.knockback_decay(player.hp) * Rules.equipment_factor(player, "kick_decay")
 	player.flash = 0.16
 	player.last_hit = owner
 	player.last_hit_at = elapsed
@@ -662,9 +695,10 @@ func resolve_projectiles(delta: float, previous_positions: Dictionary) -> void:
 		if shot.curve != 0.0:
 			shot.v = shot.v.rotated(-shot.curve * clampf(Rules.CURVE_TIME - shot.age, 0.0, delta))
 			shot.visual_step = int(shot.age + delta < Rules.CURVE_TIME)
-		if shot.seeks:
-			var steer_time := minf(shot.age + delta, 1.38) - maxf(shot.age, 0.22)
-			shot.visual_step = int(steer_time > 0.0 and steer_projectile(shot, steer_time))
+		var guidance: Dictionary = shot.guidance
+		if not guidance.is_empty():
+			var steer_time := minf(shot.age + delta, guidance.end) - maxf(shot.age, guidance.start)
+			shot.visual_step = int(steer_time > 0.0 and steer_projectile(shot, guidance, steer_time))
 		if shot.turn_at > 0.0 and shot.age >= shot.turn_at:
 			shot.turn_at = 0.0
 			shot.v = -shot.v
@@ -848,9 +882,9 @@ func resolve_links() -> void:
 			caster.link_target = 0
 
 
-func steer_projectile(shot: Dictionary, delta: float) -> bool:
+func steer_projectile(shot: Dictionary, guidance: Dictionary, delta: float) -> bool:
 	var heading: Vector2 = shot.v.normalized()
-	var best_distance := 250.0 * 250.0
+	var best_distance: float = guidance.distance * guidance.distance
 	var correction := 0.0
 	for id: int in players:
 		if not opponents(shot.owner, id) or not players[id].alive or players[id].cloak > 0.0:
@@ -858,10 +892,10 @@ func steer_projectile(shot: Dictionary, delta: float) -> bool:
 		var offset: Vector2 = players[id].p - shot.p
 		var distance := offset.length_squared()
 		var angle := heading.angle_to(offset)
-		if distance < best_distance and absf(angle) < 0.70:
+		if distance < best_distance and absf(angle) < guidance.cone:
 			best_distance = distance
 			correction = angle
-	var turn := 1.05 * delta
+	var turn: float = guidance.rate * delta
 	shot.v = shot.v.rotated(clampf(correction, -turn, turn))
 	return absf(correction) > 0.015
 
@@ -875,8 +909,8 @@ func reflect_shot(shot: Dictionary, owner: int, time: float) -> Dictionary:
 	reflected.merge({"id": serial, "owner": owner, "p": location, "v": -shot.v,
 		"age": 0.0,
 		"damage": maxi(1, roundi(shot.damage * 0.60)), "force": shot.force * 0.65,
-		"pierce": false, "turn_at": 0.0, "curve": 0.0, "seeks": false, "proc": Rules.NO_PROC, "hit": []}, true)
-	if reflected.vfx in [Rules.Vfx.SEEKER, Rules.Vfx.CURVE]:
+		"pierce": false, "turn_at": 0.0, "curve": 0.0, "guidance": {}, "proc": Rules.NO_PROC, "hit": []}, true)
+	if reflected.vfx in [Rules.Vfx.SEEKER, Rules.Vfx.REPEATER, Rules.Vfx.CURVE]:
 		reflected.visual_step = 0
 	return reflected
 
@@ -931,7 +965,10 @@ func resolve_strikes(delta: float) -> void:
 					direction = (player.p as Vector2).normalized() if not player.p.is_zero_approx() else Vector2.RIGHT
 				if strike.pull:
 					direction = -offset.normalized()
-				hit(strike.owner, id, strike.damage, strike.force, direction)
+				var damage: int = strike.damage
+				if strike.vfx == Rules.Vfx.IMPACT_BURST:
+					damage += roundi(clampf(player.impact / 120.0, 0.0, 1.0) * 18.0)
+				hit(strike.owner, id, damage, strike.force, direction)
 		effect(strike.p, Rules.SLOTS[strike.slot].color, strike.size, 0.42, 0, Rules.Cue.STRIKE,
 			Vector2.ZERO, strike.vfx)
 		strikes.remove_at(index)
@@ -978,7 +1015,7 @@ func resolve_charges(delta: float, previous_positions: Dictionary) -> void:
 				player.kick *= 0.44
 				hits.append({"owner": id, "target": target, "direction": travel.normalized(),
 					"damage": Rules.attack_damage(roundi((15 + (player.levels[Rules.MOVE] - 1) * 4) * strength)),
-					"force": 520.0 * strength, "vfx": Rules.Vfx.TACKLE_HIT})
+					"force": 590.0 * strength, "vfx": Rules.Vfx.TACKLE_HIT})
 		elif cloaked and player.cloak <= 0.0:
 			effect(player.p, Rules.SLOTS[Rules.MOVE].color, 26.0, 0.23, 0, -1, Vector2.ZERO, Rules.Vfx.CLOAK_REVEAL)
 	for contact: Dictionary in hits:
@@ -1009,7 +1046,8 @@ func finish_round(winner: int) -> void:
 		var player: Dictionary = players[order[index]]
 		if index > 0 and outperforms(players[order[index - 1]], player, false):
 			rank = index + 1
-		var reward := Rules.award(rank) if round_no < Rules.ROUNDS else 0
+		var last_place := rank > 1 and not outperforms(player, players[order.back()], false)
+		var reward := Rules.award(rank, last_place) if round_no < round_limit else 0
 		player.gold += reward
 		player.total_kills += player.kills
 		player.total_damage += player.damage
@@ -1017,7 +1055,7 @@ func finish_round(winner: int) -> void:
 			"kills": player.kills, "damage": player.damage, "award": reward})
 	shots.clear()
 	strikes.clear()
-	if round_no >= Rules.ROUNDS:
+	if round_no >= round_limit:
 		enter_results()
 	else:
 		round_no += 1
@@ -1112,7 +1150,7 @@ func snapshot(viewer := 0) -> Dictionary:
 			hidden.merge({"p": Vector2.ZERO, "aim": Vector2.RIGHT, "walk": Vector2.ZERO, "kick": Vector2.ZERO,
 				"move": Vector2.ZERO, "anchor_left": 0.0, "anchor_pos": Vector2.ZERO}, true)
 			visible_players[id] = hidden
-	return {"phase": phase, "epoch": epoch, "round": round_no, "left": left,
+	return {"phase": phase, "epoch": epoch, "round": round_no, "round_limit": round_limit, "left": left,
 		"mode": mode, "team_wins": team_wins, "team_forfeit": team_forfeit,
 		"elapsed": elapsed, "half_side": half_side, "players": visible_players, "shots": shots,
 		"strikes": strikes, "effects": effects, "rankings": rankings, "winners": winners,

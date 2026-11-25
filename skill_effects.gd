@@ -85,9 +85,10 @@ func draw_shot(kind: int, point: Vector2, forward: Vector2, radius: float, stage
 			for index in range(6, -1, -1):
 				var length := index * 5.4
 				path.append(point - forward * length - side * length * length * 0.011 * stage)
-			canvas.draw_polyline(path, Color(AMBER, 0.30), 5.4, true)
-			canvas.draw_polyline(path, Color("#ffd7b6"), 1.6, true)
-			plate(point, forward, radius * 1.5, radius * 0.54, WHITE)
+			canvas.draw_polyline(path, Color(AMBER, 0.30), radius * 0.9, true)
+			canvas.draw_polyline(path, Color("#ffd7b6"), radius * 0.27, true)
+			plate(point, forward, radius * 1.5, radius * 0.74, AMBER.lightened(0.25))
+			plate(point, forward, radius * 1.18, radius * 0.45, WHITE)
 		Vfx.SEEKER:
 			streak(point - forward * 4.0, forward, 22.0, 8.0, BLUE, 0.78)
 			plate(point, forward, radius * 1.65, radius * 0.93, STEEL)
@@ -160,6 +161,10 @@ func draw_strike(strike: Dictionary, progress: float, tint: Color) -> bool:
 			for index in range(6):
 				var ray := Vector2.from_angle(index * TAU / 6.0 + clock * 1.8)
 				light(point + ray * radius * (0.86 - progress * 0.62), 4.1, BLUE, 0.70)
+		Vfx.IMPACT_BURST:
+			light(point, radius, tint, 0.20 + progress * 0.38)
+			canvas.draw_circle(point, radius, Color(tint, 0.85), false, 1.8, true)
+			canvas.draw_circle(point, radius * lerpf(0.94, 0.18, progress), Color(tint, 0.78), false, 2.6, true)
 		Vfx.FISSURE:
 			light(point, radius, Color("#ed9c79"), 0.22 + progress * 0.18)
 			canvas.draw_circle(point, radius, Color(tint, 0.82), false, 1.4, true)
@@ -236,6 +241,10 @@ func draw_event(fx: Dictionary, progress: float) -> bool:
 			light(point, size, BLUE, fade * 0.90)
 			draw_lightning(point, flash)
 			sparks(point, Vector2.RIGHT, progress, size, BLUE, 11)
+		Vfx.IMPACT_BURST:
+			light(point, size * 1.1, fx.color, fade * 0.85)
+			canvas.draw_circle(point, maxf(1.0, size * progress), Color(fx.color, fade), false, 3.0, true)
+			sparks(point, Vector2.RIGHT, progress, size, fx.color, 10)
 		Vfx.REPEL:
 			var radius := size * (1.0 - fade * fade)
 			light(point, size, BLUE, flash * 0.48)
